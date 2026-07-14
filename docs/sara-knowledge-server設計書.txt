@@ -1,0 +1,2899 @@
+以下を、そのままCodexへ渡せる実装仕様書としてまとめます。既存の`AI-data-manager`を廃棄せず、WordPressを管理クライアントとして残しながら、PostgreSQLを正本とする構成です。
+
+# SARA Knowledge Server
+
+## PostgreSQLベース AI学習データ・イベント記憶・関係データ管理サーバー設計仕様書
+
+バージョン: 0.1.0
+対象リポジトリ案: `sara-knowledge-server`
+既存連携対象: `matsushibadenki/AI-data-manager`
+実装担当: Codex
+実行環境: Docker Compose
+主要言語: JavaScript
+APIランタイム: Bun
+データベース: PostgreSQL
+管理画面: Next.js
+オブジェクトストレージ: MinIO
+キャッシュ・ジョブキュー: Redis
+
+---
+
+# 1. プロジェクトの目的
+
+本プロジェクトは、既存のWordPressテーマ型アプリケーション`AI-data-manager`から、AI学習データ、イベント記憶、経験、概念、関係、評価履歴、データセット、学習実験の管理機能を分離し、PostgreSQLを中心とした独立データベースサーバーとして実装する。
+
+既存の`AI-data-manager`は、人間が学習データを入力、編集、確認、承認する管理インターフェイスとして当面維持する。
+
+新しい`SARA Knowledge Server`は、以下の役割を担当する。
+
+```text
+・AI学習データの正本管理
+・データのバージョン管理
+・イベント記憶の保存
+・経験単位の保存
+・概念と関係の保存
+・データの評価、承認、却下
+・出典、ライセンス、生成元の追跡
+・JSONL、JSON、CSVによる入出力
+・SARA Engineへのデータ提供
+・WordPressからのデータ登録
+・外部学習パイプラインからのデータ取得
+・将来のRISA型構造編集への対応
+・ベクトル検索と全文検索
+・監査ログの保存
+```
+
+本システムはLLMそのものではない。
+
+LLM、WordPress、SARA Engine、学習スクリプトなどから利用される、独立した認知データ・学習データ基盤として設計する。
+
+---
+
+# 2. 基本方針
+
+## 2.1 PostgreSQLを正本とする
+
+移行完了後は、学習データ、イベント記憶、概念、関係、評価、バージョン履歴について、PostgreSQLを唯一の正本とする。
+
+WordPressの`wp_posts`、`wp_postmeta`、独自SARAテーブルは、段階移行中のみ使用する。
+
+最終的にWordPress側には、必要に応じて以下のみを保持する。
+
+```text
+・PostgreSQL側レコードのUUID
+・表示用タイトル
+・同期状態
+・最終同期日時
+・WordPressメディアID
+```
+
+## 2.2 UIとデータベースを分離する
+
+管理UI、REST API、データベース、ファイル保存を分離する。
+
+```text
+WordPress AI-data-manager
+Next.js管理画面
+SARA Engine
+Python学習スクリプト
+外部LLM
+        │
+        ▼
+SARA Knowledge API
+        │
+        ├── PostgreSQL
+        ├── MinIO
+        └── Redis
+```
+
+WordPressからPostgreSQLへ直接SQL接続してはならない。
+
+すべての外部システムはAPIを介してアクセスする。
+
+## 2.3 データと認知構造を論理分離する
+
+同一PostgreSQL内で、スキーマを分離する。
+
+```text
+auth
+dataset
+memory
+training
+system
+```
+
+役割は以下とする。
+
+```text
+auth
+ユーザー、APIキー、権限
+
+dataset
+学習データ、バージョン、アノテーション、出典、データセット
+
+memory
+イベント、経験、概念、実体、関係、活性、仮説
+
+training
+学習実験、モデル、チェックポイント、評価結果
+
+system
+監査ログ、ジョブ、同期状態、Webhook
+```
+
+## 2.4 すべての重要なデータにUUIDを使用する
+
+外部公開IDにはUUIDを使用する。
+
+PostgreSQL内部で連番IDを併用してもよいが、APIでは連番IDを公開しない。
+
+UUID生成には`gen_random_uuid()`を使用する。
+
+## 2.5 削除は原則として論理削除にする
+
+学習データ、イベント、概念、関係、データセットは原則として物理削除しない。
+
+以下の列を共通で持たせる。
+
+```text
+created_at
+updated_at
+deleted_at
+created_by
+updated_by
+```
+
+管理者向けの完全削除APIは、将来対応として分離する。
+
+---
+
+# 3. 対象範囲
+
+## 3.1 初期実装に含める機能
+
+```text
+・Docker Compose環境
+・PostgreSQL初期化
+・pgvector有効化
+・Bun REST API
+・Next.js管理画面
+・MinIOファイル保存
+・Redisジョブキュー
+・ユーザー認証
+・APIキー認証
+・学習データCRUD
+・イベントCRUD
+・経験CRUD
+・概念CRUD
+・関係CRUD
+・出典管理
+・データバージョン管理
+・タグ管理
+・評価管理
+・データセット管理
+・JSONLインポート
+・JSONLエクスポート
+・CSVインポート
+・画像・音声・文書アップロード
+・全文検索
+・ベクトル検索
+・複合検索
+・WordPress同期API
+・監査ログ
+・OpenAPIドキュメント
+・ヘルスチェック
+・テスト
+```
+
+## 3.2 初期実装に含めない機能
+
+```text
+・モデル学習そのもの
+・LLM推論サーバー
+・SNN実行
+・RISA活性伝播
+・自動概念形成
+・高度な自律忘却
+・PostgreSQL本体の改変
+・PostgreSQL C拡張の独自開発
+・Kubernetes対応
+・マルチテナント課金
+```
+
+ただし、将来実装できるデータ構造とAPI拡張性を確保する。
+
+---
+
+# 4. 推奨技術構成
+
+## 4.1 APIサーバー
+
+```text
+Runtime: Bun
+Language: JavaScript
+Framework: Hono
+Validation: Zod
+Database access: Drizzle ORM
+SQL migration: Drizzle Kit
+API specification: OpenAPI 3.1
+Authentication: JWT + API key
+Password hash: Argon2id
+Test: Vitest
+Logging: Pino互換JSONログ
+```
+
+TypeScriptは使用せず、JavaScriptで実装する。
+
+ただし、JSDocによる型定義を使用する。
+
+すべてのJavaScriptファイル先頭に、配置パスをコメントとして記述する。
+
+例:
+
+```js
+// /apps/api/src/routes/records.js
+```
+
+## 4.2 管理画面
+
+```text
+Next.js
+React
+JavaScript
+App Router
+CSS Modules
+TanStack Query
+React Hook Form
+Zod
+```
+
+Next.jsプロジェクト作成条件:
+
+```text
+JavaScript
+ESLint: Yes
+Tailwind CSS: No
+src directory: Yes
+App Router: Yes
+Turbopack: Yes
+```
+
+## 4.3 PostgreSQL
+
+PostgreSQLは公式イメージまたはpgvector同梱イメージを使用する。
+
+必要な拡張:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS unaccent;
+```
+
+JSONB、全文検索、再帰CTE、行レベルセキュリティ、部分インデックスを活用する。
+
+ベクトル検索は補助機能とし、明示的な関係データを置き換えない。
+
+## 4.4 オブジェクトストレージ
+
+画像、音声、動画、PDF、元文書などのバイナリはPostgreSQLへ直接保存しない。
+
+MinIOへ保存し、PostgreSQLには以下を保存する。
+
+```text
+object_key
+bucket_name
+mime_type
+size_bytes
+sha256
+original_filename
+width
+height
+duration_ms
+metadata
+```
+
+## 4.5 Redis
+
+Redisは以下に使用する。
+
+```text
+・非同期インポート
+・非同期エクスポート
+・サムネイル生成
+・Embedding生成要求
+・Webhook再送
+・大量データ処理
+・短期キャッシュ
+```
+
+Redisを正本として使用してはならない。
+
+---
+
+# 5. Docker構成
+
+## 5.1 コンテナ一覧
+
+```text
+postgres
+api
+admin
+worker
+redis
+minio
+minio-init
+mailpit
+```
+
+役割:
+
+```text
+postgres
+PostgreSQL本体
+
+api
+Bun APIサーバー
+
+admin
+Next.js管理画面
+
+worker
+Bunバックグラウンドワーカー
+
+redis
+ジョブキューとキャッシュ
+
+minio
+オブジェクトストレージ
+
+minio-init
+初期バケット作成
+
+mailpit
+開発環境用メール確認
+```
+
+## 5.2 Docker Compose要件
+
+`docker-compose.yml`には`version`行を記述しない。
+
+すべての永続データはnamed volumeへ保存する。
+
+```text
+postgres_data
+redis_data
+minio_data
+```
+
+すべての主要サービスにhealthcheckを設定する。
+
+APIはPostgreSQL、Redis、MinIOのヘルスチェック成功後に起動する。
+
+外部公開ポートは`.env`で変更可能にする。
+
+初期値:
+
+```text
+Admin UI: 3000
+API: 4000
+PostgreSQL: 5432
+MinIO API: 9000
+MinIO Console: 9001
+Redis: 6379
+Mailpit UI: 8025
+```
+
+本番環境ではPostgreSQL、Redis、MinIO APIをホストへ直接公開しない構成を選択可能にする。
+
+## 5.3 必須コマンド
+
+以下のコマンドで起動できること。
+
+```bash
+docker compose up -d
+```
+
+初期化、マイグレーション、シード投入:
+
+```bash
+docker compose exec api bun run db:migrate
+docker compose exec api bun run db:seed
+```
+
+テスト:
+
+```bash
+docker compose exec api bun test
+docker compose exec admin npm test
+```
+
+停止:
+
+```bash
+docker compose down
+```
+
+データを含めた完全削除:
+
+```bash
+docker compose down -v
+```
+
+## 5.4 環境変数
+
+ルートに以下を作成する。
+
+```text
+.env.example
+.env
+```
+
+最低限必要な値:
+
+```dotenv
+APP_ENV=development
+
+POSTGRES_DB=sara_knowledge
+POSTGRES_USER=sara
+POSTGRES_PASSWORD=change_me
+DATABASE_URL=postgresql://sara:change_me@postgres:5432/sara_knowledge
+
+REDIS_URL=redis://redis:6379
+
+MINIO_ENDPOINT=minio
+MINIO_PORT=9000
+MINIO_ACCESS_KEY=sara_minio
+MINIO_SECRET_KEY=change_me
+MINIO_USE_SSL=false
+MINIO_BUCKET=sara-assets
+
+JWT_SECRET=change_me
+JWT_ACCESS_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=30d
+
+API_PORT=4000
+ADMIN_PORT=3000
+NEXT_PUBLIC_API_BASE_URL=http://localhost:4000/api/v1
+
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost
+
+WORDPRESS_WEBHOOK_SECRET=change_me
+WEBHOOK_SIGNING_SECRET=change_me
+
+MAX_UPLOAD_SIZE_MB=100
+```
+
+秘密情報をGitへコミットしてはならない。
+
+---
+
+# 6. ディレクトリ構成
+
+```text
+sara-knowledge-server/
+├── apps/
+│   ├── api/
+│   │   ├── Dockerfile
+│   │   ├── package.json
+│   │   ├── jsconfig.json
+│   │   ├── src/
+│   │   │   ├── index.js
+│   │   │   ├── app.js
+│   │   │   ├── config/
+│   │   │   ├── db/
+│   │   │   │   ├── client.js
+│   │   │   │   ├── schema/
+│   │   │   │   ├── migrations/
+│   │   │   │   └── seed/
+│   │   │   ├── middleware/
+│   │   │   ├── routes/
+│   │   │   ├── controllers/
+│   │   │   ├── services/
+│   │   │   ├── repositories/
+│   │   │   ├── validators/
+│   │   │   ├── serializers/
+│   │   │   ├── jobs/
+│   │   │   ├── events/
+│   │   │   ├── storage/
+│   │   │   ├── auth/
+│   │   │   ├── errors/
+│   │   │   └── utils/
+│   │   └── tests/
+│   ├── admin/
+│   │   ├── Dockerfile
+│   │   ├── package.json
+│   │   ├── src/
+│   │   │   ├── app/
+│   │   │   ├── components/
+│   │   │   ├── features/
+│   │   │   ├── lib/
+│   │   │   ├── hooks/
+│   │   │   └── styles/
+│   │   └── tests/
+│   └── worker/
+│       ├── Dockerfile
+│       ├── package.json
+│       └── src/
+├── packages/
+│   ├── schemas/
+│   ├── api-client/
+│   └── shared/
+├── docker/
+│   ├── postgres/
+│   │   └── init/
+│   ├── minio/
+│   └── nginx/
+├── docs/
+│   ├── architecture.md
+│   ├── database.md
+│   ├── api.md
+│   ├── wordpress-integration.md
+│   ├── migration.md
+│   └── security.md
+├── scripts/
+│   ├── backup.sh
+│   ├── restore.sh
+│   ├── migrate-wordpress.js
+│   └── healthcheck.sh
+├── docker-compose.yml
+├── docker-compose.prod.yml
+├── .env.example
+├── .gitignore
+├── README.md
+└── LICENSE
+```
+
+---
+
+# 7. PostgreSQLスキーマ
+
+## 7.1 auth.users
+
+```text
+id UUID PRIMARY KEY
+email CITEXT UNIQUE NOT NULL
+display_name TEXT NOT NULL
+password_hash TEXT
+status TEXT NOT NULL
+role TEXT NOT NULL
+locale TEXT
+preferences JSONB NOT NULL DEFAULT '{}'
+last_login_at TIMESTAMPTZ
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+`status`:
+
+```text
+active
+disabled
+invited
+```
+
+`role`:
+
+```text
+admin
+editor
+reviewer
+viewer
+service
+```
+
+## 7.2 auth.api_keys
+
+```text
+id UUID PRIMARY KEY
+user_id UUID REFERENCES auth.users
+name TEXT NOT NULL
+key_prefix TEXT NOT NULL
+key_hash TEXT NOT NULL
+scopes TEXT[] NOT NULL
+last_used_at TIMESTAMPTZ
+expires_at TIMESTAMPTZ
+revoked_at TIMESTAMPTZ
+created_at TIMESTAMPTZ NOT NULL
+```
+
+APIキー本体は作成時に一度だけ返す。
+
+データベースにはハッシュのみ保存する。
+
+## 7.3 dataset.sources
+
+元データの出典を表す。
+
+```text
+id UUID PRIMARY KEY
+source_type TEXT NOT NULL
+title TEXT
+url TEXT
+author TEXT
+publisher TEXT
+published_at TIMESTAMPTZ
+retrieved_at TIMESTAMPTZ
+license_type TEXT
+license_text TEXT
+copyright_status TEXT
+content_hash TEXT
+metadata JSONB NOT NULL DEFAULT '{}'
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+`source_type`:
+
+```text
+manual
+website
+document
+book
+dataset
+conversation
+sensor
+generated
+imported
+wordpress
+```
+
+## 7.4 dataset.records
+
+学習データの論理的な親レコード。
+
+```text
+id UUID PRIMARY KEY
+record_type TEXT NOT NULL
+title TEXT
+status TEXT NOT NULL
+current_version_id UUID
+language_code TEXT
+quality_score DOUBLE PRECISION
+confidence DOUBLE PRECISION
+source_id UUID REFERENCES dataset.sources
+owner_id UUID REFERENCES auth.users
+external_system TEXT
+external_id TEXT
+metadata JSONB NOT NULL DEFAULT '{}'
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+`record_type`:
+
+```text
+plain_text
+instruction
+qa
+chat
+sharegpt
+chatml
+dpo
+rlhf
+classification
+image_caption
+multimodal
+event_sequence
+custom
+```
+
+`status`:
+
+```text
+draft
+pending_review
+approved
+rejected
+archived
+```
+
+## 7.5 dataset.record_versions
+
+レコード内容のバージョンを保存する。
+
+```text
+id UUID PRIMARY KEY
+record_id UUID NOT NULL REFERENCES dataset.records
+version_number INTEGER NOT NULL
+schema_version TEXT NOT NULL
+content JSONB NOT NULL
+plain_text TEXT
+change_summary TEXT
+created_by UUID REFERENCES auth.users
+created_at TIMESTAMPTZ NOT NULL
+```
+
+制約:
+
+```text
+UNIQUE(record_id, version_number)
+```
+
+`records.current_version_id`は最新バージョンを参照する。
+
+更新時に既存バージョンを上書きしてはならない。
+
+必ず新しい`record_versions`行を作成する。
+
+## 7.6 dataset.annotations
+
+```text
+id UUID PRIMARY KEY
+record_id UUID NOT NULL
+record_version_id UUID
+annotation_type TEXT NOT NULL
+label TEXT
+value JSONB NOT NULL
+start_offset INTEGER
+end_offset INTEGER
+created_by UUID
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+`annotation_type`例:
+
+```text
+label
+span
+entity
+relation
+quality
+safety
+correction
+comment
+```
+
+## 7.7 dataset.tags
+
+```text
+id UUID PRIMARY KEY
+name TEXT UNIQUE NOT NULL
+slug TEXT UNIQUE NOT NULL
+description TEXT
+created_at TIMESTAMPTZ NOT NULL
+```
+
+## 7.8 dataset.record_tags
+
+```text
+record_id UUID REFERENCES dataset.records
+tag_id UUID REFERENCES dataset.tags
+PRIMARY KEY(record_id, tag_id)
+```
+
+## 7.9 dataset.assets
+
+```text
+id UUID PRIMARY KEY
+record_id UUID
+source_id UUID
+bucket_name TEXT NOT NULL
+object_key TEXT UNIQUE NOT NULL
+original_filename TEXT
+mime_type TEXT NOT NULL
+size_bytes BIGINT NOT NULL
+sha256 TEXT NOT NULL
+width INTEGER
+height INTEGER
+duration_ms BIGINT
+metadata JSONB NOT NULL DEFAULT '{}'
+created_by UUID
+created_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+同一SHA-256のファイル重複を検出する。
+
+重複を完全禁止せず、既存アセットへの参照を選択できるようにする。
+
+## 7.10 dataset.evaluations
+
+```text
+id UUID PRIMARY KEY
+record_id UUID NOT NULL
+record_version_id UUID
+evaluator_type TEXT NOT NULL
+evaluator_id TEXT
+evaluation_type TEXT NOT NULL
+score DOUBLE PRECISION
+result TEXT
+details JSONB NOT NULL DEFAULT '{}'
+created_by UUID
+created_at TIMESTAMPTZ NOT NULL
+```
+
+`evaluator_type`:
+
+```text
+human
+rule
+model
+external
+```
+
+`result`:
+
+```text
+pass
+fail
+warning
+unknown
+```
+
+## 7.11 dataset.datasets
+
+```text
+id UUID PRIMARY KEY
+name TEXT NOT NULL
+description TEXT
+status TEXT NOT NULL
+schema_definition JSONB
+default_split_strategy JSONB
+created_by UUID
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+## 7.12 dataset.dataset_members
+
+```text
+dataset_id UUID REFERENCES dataset.datasets
+record_id UUID REFERENCES dataset.records
+record_version_id UUID
+split_name TEXT NOT NULL
+weight DOUBLE PRECISION NOT NULL DEFAULT 1
+position BIGINT
+metadata JSONB NOT NULL DEFAULT '{}'
+created_at TIMESTAMPTZ NOT NULL
+PRIMARY KEY(dataset_id, record_id)
+```
+
+`split_name`:
+
+```text
+train
+validation
+test
+holdout
+custom
+```
+
+---
+
+# 8. memoryスキーマ
+
+## 8.1 memory.events
+
+既存`wp_sara_events`を拡張移植する。
+
+```text
+id UUID PRIMARY KEY
+event_uid TEXT UNIQUE NOT NULL
+source_id UUID
+experience_id UUID
+occurred_at TIMESTAMPTZ
+sequence_time DOUBLE PRECISION
+duration DOUBLE PRECISION
+modality TEXT NOT NULL
+channel TEXT
+event_type TEXT NOT NULL
+symbol TEXT
+payload JSONB NOT NULL DEFAULT '{}'
+state_before JSONB
+state_after JSONB
+reward DOUBLE PRECISION NOT NULL DEFAULT 0
+prediction_error DOUBLE PRECISION NOT NULL DEFAULT 0
+confidence DOUBLE PRECISION NOT NULL DEFAULT 1
+quality_score DOUBLE PRECISION NOT NULL DEFAULT 0.5
+proposal_source TEXT NOT NULL
+extractor_name TEXT
+extractor_version TEXT
+verification_state TEXT NOT NULL
+evidence_type TEXT
+source_hash TEXT
+event_cost DOUBLE PRECISION NOT NULL DEFAULT 1
+novelty DOUBLE PRECISION NOT NULL DEFAULT 0
+redundancy DOUBLE PRECISION NOT NULL DEFAULT 0
+coverage DOUBLE PRECISION NOT NULL DEFAULT 0
+priority_score DOUBLE PRECISION NOT NULL DEFAULT 0
+embedding VECTOR
+metadata JSONB NOT NULL DEFAULT '{}'
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+Embedding次元は環境変数またはマイグレーション定数で固定する。
+
+初期値は1536に固定せず、採用モデルに合わせて明示的に設定する。
+
+## 8.2 memory.experiences
+
+```text
+id UUID PRIMARY KEY
+experience_uid TEXT UNIQUE NOT NULL
+source_id UUID
+title TEXT
+state_before JSONB
+event_summary JSONB
+state_after JSONB
+reward DOUBLE PRECISION NOT NULL DEFAULT 0
+prediction_error DOUBLE PRECISION NOT NULL DEFAULT 0
+quality_score DOUBLE PRECISION NOT NULL DEFAULT 0.5
+curriculum_level TEXT NOT NULL
+split_name TEXT NOT NULL
+metadata JSONB NOT NULL DEFAULT '{}'
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+## 8.3 memory.entities
+
+世界内の実体を表す。
+
+```text
+id UUID PRIMARY KEY
+entity_uid TEXT UNIQUE NOT NULL
+entity_type TEXT NOT NULL
+canonical_name TEXT
+description TEXT
+properties JSONB NOT NULL DEFAULT '{}'
+embedding VECTOR
+confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5
+verification_state TEXT NOT NULL
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+例:
+
+```text
+人物
+組織
+場所
+物体
+抽象概念
+プロジェクト
+モデル
+データセット
+```
+
+## 8.4 memory.entity_aliases
+
+```text
+id UUID PRIMARY KEY
+entity_id UUID NOT NULL
+alias TEXT NOT NULL
+language_code TEXT
+alias_type TEXT
+confidence DOUBLE PRECISION
+created_at TIMESTAMPTZ NOT NULL
+UNIQUE(entity_id, alias)
+```
+
+## 8.5 memory.concepts
+
+```text
+id UUID PRIMARY KEY
+concept_uid TEXT UNIQUE NOT NULL
+label TEXT
+concept_type TEXT NOT NULL
+description TEXT
+evidence_count BIGINT NOT NULL DEFAULT 0
+contradiction_count BIGINT NOT NULL DEFAULT 0
+verification_state TEXT NOT NULL
+utility_score DOUBLE PRECISION NOT NULL DEFAULT 0
+event_pattern JSONB
+source_refs JSONB
+payload JSONB NOT NULL DEFAULT '{}'
+embedding VECTOR
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+## 8.6 memory.relations
+
+イベント間だけでなく、イベント、概念、実体、経験、学習データ間の関係を表現できるようにする。
+
+```text
+id UUID PRIMARY KEY
+relation_uid TEXT UNIQUE NOT NULL
+
+source_type TEXT NOT NULL
+source_id UUID NOT NULL
+
+relation_type TEXT NOT NULL
+
+target_type TEXT NOT NULL
+target_id UUID NOT NULL
+
+strength DOUBLE PRECISION NOT NULL DEFAULT 0.5
+confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5
+evidence_count BIGINT NOT NULL DEFAULT 0
+counterexample_count BIGINT NOT NULL DEFAULT 0
+
+min_delay_ms DOUBLE PRECISION
+max_delay_ms DOUBLE PRECISION
+
+valid_from TIMESTAMPTZ
+valid_until TIMESTAMPTZ
+expires_at TIMESTAMPTZ
+
+verification_state TEXT NOT NULL
+proposal_source TEXT NOT NULL
+
+context JSONB NOT NULL DEFAULT '{}'
+payload JSONB NOT NULL DEFAULT '{}'
+
+created_by UUID
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+`source_type`と`target_type`:
+
+```text
+event
+experience
+entity
+concept
+record
+dataset
+model
+```
+
+初期実装ではポリモーフィック外部キーをデータベースだけで完全保証できないため、サービス層で参照先存在確認を行う。
+
+将来的には型別関連テーブルへの分割も検討する。
+
+## 8.7 memory.relation_evidence
+
+```text
+id UUID PRIMARY KEY
+relation_id UUID NOT NULL
+evidence_type TEXT NOT NULL
+reference_type TEXT NOT NULL
+reference_id UUID
+supports BOOLEAN NOT NULL
+weight DOUBLE PRECISION NOT NULL DEFAULT 1
+details JSONB
+created_at TIMESTAMPTZ NOT NULL
+```
+
+## 8.8 memory.activations
+
+推論や探索時の短期的活性状態を保存する。
+
+```text
+id UUID PRIMARY KEY
+session_id UUID NOT NULL
+node_type TEXT NOT NULL
+node_id UUID NOT NULL
+activation DOUBLE PRECISION NOT NULL
+depth INTEGER NOT NULL
+reason JSONB
+created_at TIMESTAMPTZ NOT NULL
+expires_at TIMESTAMPTZ NOT NULL
+```
+
+これは長期知識ではなく、一時的な探索記録として扱う。
+
+---
+
+# 9. trainingスキーマ
+
+## 9.1 training.models
+
+```text
+id UUID PRIMARY KEY
+name TEXT NOT NULL
+provider TEXT
+model_family TEXT
+model_version TEXT
+base_model TEXT
+configuration JSONB NOT NULL DEFAULT '{}'
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+```
+
+## 9.2 training.runs
+
+```text
+id UUID PRIMARY KEY
+run_uid TEXT UNIQUE NOT NULL
+model_id UUID
+dataset_id UUID
+status TEXT NOT NULL
+parameters JSONB NOT NULL DEFAULT '{}'
+environment JSONB NOT NULL DEFAULT '{}'
+started_at TIMESTAMPTZ
+finished_at TIMESTAMPTZ
+created_by UUID
+created_at TIMESTAMPTZ NOT NULL
+```
+
+`status`:
+
+```text
+queued
+running
+completed
+failed
+cancelled
+```
+
+## 9.3 training.metrics
+
+```text
+id UUID PRIMARY KEY
+run_id UUID NOT NULL
+step BIGINT
+epoch DOUBLE PRECISION
+metric_name TEXT NOT NULL
+metric_value DOUBLE PRECISION NOT NULL
+metadata JSONB
+recorded_at TIMESTAMPTZ NOT NULL
+```
+
+## 9.4 training.outputs
+
+```text
+id UUID PRIMARY KEY
+run_id UUID NOT NULL
+record_id UUID
+input JSONB
+output JSONB
+score DOUBLE PRECISION
+metadata JSONB
+created_at TIMESTAMPTZ NOT NULL
+```
+
+---
+
+# 10. systemスキーマ
+
+## 10.1 system.audit_logs
+
+すべての重要な変更を記録する。
+
+```text
+id UUID PRIMARY KEY
+actor_type TEXT NOT NULL
+actor_id UUID
+action TEXT NOT NULL
+resource_type TEXT NOT NULL
+resource_id UUID
+request_id TEXT
+ip_address INET
+user_agent TEXT
+before_data JSONB
+after_data JSONB
+metadata JSONB
+created_at TIMESTAMPTZ NOT NULL
+```
+
+対象操作:
+
+```text
+create
+update
+delete
+restore
+approve
+reject
+import
+export
+login
+api_key_create
+api_key_revoke
+```
+
+## 10.2 system.sync_states
+
+WordPressなど外部システムとの同期状態。
+
+```text
+id UUID PRIMARY KEY
+system_name TEXT NOT NULL
+external_type TEXT NOT NULL
+external_id TEXT NOT NULL
+internal_type TEXT NOT NULL
+internal_id UUID NOT NULL
+external_version TEXT
+internal_version TEXT
+sync_status TEXT NOT NULL
+last_synced_at TIMESTAMPTZ
+last_error JSONB
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+UNIQUE(system_name, external_type, external_id)
+```
+
+## 10.3 system.webhooks
+
+```text
+id UUID PRIMARY KEY
+name TEXT NOT NULL
+target_url TEXT NOT NULL
+secret_hash TEXT NOT NULL
+events TEXT[] NOT NULL
+enabled BOOLEAN NOT NULL DEFAULT TRUE
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+```
+
+## 10.4 system.webhook_deliveries
+
+```text
+id UUID PRIMARY KEY
+webhook_id UUID NOT NULL
+event_name TEXT NOT NULL
+payload JSONB NOT NULL
+status TEXT NOT NULL
+attempt_count INTEGER NOT NULL DEFAULT 0
+http_status INTEGER
+response_body TEXT
+next_retry_at TIMESTAMPTZ
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+```
+
+---
+
+# 11. インデックス設計
+
+最低限、以下を作成する。
+
+```text
+records:
+status
+record_type
+language_code
+quality_score
+source_id
+created_at
+deleted_at IS NULLの部分インデックス
+
+record_versions:
+record_id + version_number DESC
+plain_text全文検索GIN
+content JSONB GIN
+
+events:
+event_uid
+experience_id
+modality
+event_type
+prediction_error
+quality_score
+verification_state
+priority_score
+occurred_at
+
+relations:
+source_type + source_id
+target_type + target_id
+relation_type
+verification_state
+strength
+confidence
+
+sources:
+source_type
+url
+content_hash
+
+assets:
+sha256
+mime_type
+
+audit_logs:
+resource_type + resource_id
+actor_id
+created_at
+```
+
+全文検索用に生成列または更新処理で`tsvector`を保持する。
+
+日本語全文検索はPostgreSQL標準機能だけでは形態素解析に制限があるため、初期実装では以下を組み合わせる。
+
+```text
+・pg_trgm
+・ILIKE
+・unaccent
+・Embedding検索
+```
+
+将来的にPGroonga等を追加できる設計にする。
+
+ベクトルインデックスは初期データ量が少ない段階では作成を急がない。
+
+一定件数を超えた場合にHNSWまたはIVFFlatを追加する。
+
+---
+
+# 12. API設計
+
+ベースURL:
+
+```text
+/api/v1
+```
+
+レスポンス形式:
+
+```json
+{
+  "data": {},
+  "meta": {},
+  "error": null
+}
+```
+
+エラー時:
+
+```json
+{
+  "data": null,
+  "meta": {
+    "request_id": "req_xxx"
+  },
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "入力値が正しくありません。",
+    "details": []
+  }
+}
+```
+
+## 12.1 ヘルスチェック
+
+```text
+GET /health
+GET /health/live
+GET /health/ready
+```
+
+`ready`はPostgreSQL、Redis、MinIOへの接続を確認する。
+
+## 12.2 認証
+
+```text
+POST /auth/login
+POST /auth/refresh
+POST /auth/logout
+GET  /auth/me
+POST /auth/change-password
+```
+
+APIキー:
+
+```text
+GET    /api-keys
+POST   /api-keys
+DELETE /api-keys/:id
+```
+
+## 12.3 学習データ
+
+```text
+GET    /records
+POST   /records
+GET    /records/:id
+PATCH  /records/:id
+DELETE /records/:id
+POST   /records/:id/restore
+GET    /records/:id/versions
+GET    /records/:id/versions/:versionId
+POST   /records/:id/versions
+POST   /records/:id/approve
+POST   /records/:id/reject
+POST   /records/:id/duplicate
+```
+
+一覧検索パラメータ:
+
+```text
+page
+limit
+cursor
+record_type
+status
+language
+tag
+source_id
+dataset_id
+quality_min
+quality_max
+created_from
+created_to
+updated_from
+updated_to
+query
+semantic_query
+sort
+order
+include_deleted
+```
+
+`limit`最大値は100とする。
+
+大量取得はエクスポートAPIを使用する。
+
+## 12.4 アノテーション
+
+```text
+GET    /records/:id/annotations
+POST   /records/:id/annotations
+PATCH  /annotations/:id
+DELETE /annotations/:id
+```
+
+## 12.5 評価
+
+```text
+GET  /records/:id/evaluations
+POST /records/:id/evaluations
+GET  /evaluations/:id
+```
+
+## 12.6 データセット
+
+```text
+GET    /datasets
+POST   /datasets
+GET    /datasets/:id
+PATCH  /datasets/:id
+DELETE /datasets/:id
+
+GET    /datasets/:id/members
+POST   /datasets/:id/members
+DELETE /datasets/:id/members/:recordId
+POST   /datasets/:id/build
+POST   /datasets/:id/split
+POST   /datasets/:id/export
+```
+
+## 12.7 出典
+
+```text
+GET    /sources
+POST   /sources
+GET    /sources/:id
+PATCH  /sources/:id
+DELETE /sources/:id
+```
+
+## 12.8 アセット
+
+```text
+POST   /assets/upload-url
+POST   /assets/complete
+GET    /assets/:id
+DELETE /assets/:id
+GET    /assets/:id/download-url
+```
+
+アップロードは可能ならpresigned URL方式を使用する。
+
+小容量ファイル向けにmultipart直接アップロードAPIを追加してもよい。
+
+```text
+POST /assets/upload
+```
+
+## 12.9 イベント
+
+```text
+GET    /memory/events
+POST   /memory/events
+GET    /memory/events/:id
+PATCH  /memory/events/:id
+DELETE /memory/events/:id
+POST   /memory/events/bulk
+```
+
+## 12.10 経験
+
+```text
+GET    /memory/experiences
+POST   /memory/experiences
+GET    /memory/experiences/:id
+PATCH  /memory/experiences/:id
+DELETE /memory/experiences/:id
+POST   /memory/experiences/:id/events
+```
+
+## 12.11 実体
+
+```text
+GET    /memory/entities
+POST   /memory/entities
+GET    /memory/entities/:id
+PATCH  /memory/entities/:id
+DELETE /memory/entities/:id
+POST   /memory/entities/resolve
+POST   /memory/entities/:id/aliases
+```
+
+`resolve`は名称、別名、Embedding、外部IDを用いて候補を返す。
+
+自動統合は初期実装では行わない。
+
+## 12.12 概念
+
+```text
+GET    /memory/concepts
+POST   /memory/concepts
+GET    /memory/concepts/:id
+PATCH  /memory/concepts/:id
+DELETE /memory/concepts/:id
+POST   /memory/concepts/:id/verify
+POST   /memory/concepts/:id/reject
+```
+
+## 12.13 関係
+
+```text
+GET    /memory/relations
+POST   /memory/relations
+GET    /memory/relations/:id
+PATCH  /memory/relations/:id
+DELETE /memory/relations/:id
+POST   /memory/relations/:id/evidence
+GET    /memory/nodes/:type/:id/neighbors
+POST   /memory/traverse
+```
+
+`/memory/traverse`入力例:
+
+```json
+{
+  "start_nodes": [
+    {
+      "type": "concept",
+      "id": "UUID"
+    }
+  ],
+  "relation_types": [
+    "is_a",
+    "causes",
+    "associated_with"
+  ],
+  "max_depth": 3,
+  "max_nodes": 100,
+  "min_strength": 0.3,
+  "min_confidence": 0.5,
+  "valid_at": "2026-07-14T00:00:00Z"
+}
+```
+
+レスポンスには探索ノード、エッジ、深さ、探索理由を含める。
+
+## 12.14 検索
+
+```text
+POST /search
+POST /search/text
+POST /search/vector
+POST /search/hybrid
+```
+
+ハイブリッド検索入力例:
+
+```json
+{
+  "query": "犬の行動に関する高品質な日本語データ",
+  "targets": [
+    "records",
+    "events",
+    "concepts"
+  ],
+  "filters": {
+    "language_code": "ja",
+    "quality_min": 0.8,
+    "status": "approved"
+  },
+  "weights": {
+    "text": 0.35,
+    "vector": 0.35,
+    "relation": 0.2,
+    "recency": 0.1
+  },
+  "limit": 20
+}
+```
+
+Embedding生成器はAPIサーバーへ固定実装しない。
+
+Embedding providerインターフェイスを定義する。
+
+```text
+none
+openai
+ollama
+external
+```
+
+初期値は`none`とし、Embeddingなしでもシステム全体が動作すること。
+
+## 12.15 インポート
+
+```text
+POST /imports
+GET  /imports/:id
+POST /imports/:id/confirm
+POST /imports/:id/cancel
+GET  /imports/:id/errors
+```
+
+対応形式:
+
+```text
+JSONL
+JSON
+CSV
+ZIP
+```
+
+処理段階:
+
+```text
+uploaded
+parsing
+preview_ready
+confirmed
+importing
+completed
+failed
+cancelled
+```
+
+インポートは原則として非同期ジョブにする。
+
+プレビュー時に以下を返す。
+
+```text
+・総件数
+・有効件数
+・エラー件数
+・フォーマット推定
+・重複候補
+・先頭100件
+・必要な変換
+```
+
+## 12.16 エクスポート
+
+```text
+POST /exports
+GET  /exports/:id
+GET  /exports/:id/download
+DELETE /exports/:id
+```
+
+出力形式:
+
+```text
+JSONL
+JSON
+CSV
+ZIP
+ChatML
+ShareGPT
+Alpaca
+DPO
+SARA Event Sequence
+```
+
+大量データは非同期生成し、MinIOへ一時保存する。
+
+ダウンロードURLには有効期限を付ける。
+
+## 12.17 Webhook
+
+```text
+GET    /webhooks
+POST   /webhooks
+PATCH  /webhooks/:id
+DELETE /webhooks/:id
+POST   /webhooks/:id/test
+GET    /webhooks/:id/deliveries
+```
+
+イベント例:
+
+```text
+record.created
+record.updated
+record.approved
+record.deleted
+dataset.export.completed
+import.completed
+event.created
+concept.verified
+relation.created
+```
+
+WebhookにはHMAC-SHA256署名を付ける。
+
+---
+
+# 13. WordPress連携API
+
+既存`AI-data-manager`から利用する専用エンドポイントを用意する。
+
+```text
+POST /integrations/wordpress/sync/records
+POST /integrations/wordpress/sync/events
+POST /integrations/wordpress/sync/experiences
+POST /integrations/wordpress/sync/relations
+POST /integrations/wordpress/sync/concepts
+POST /integrations/wordpress/assets
+GET  /integrations/wordpress/status/:externalId
+```
+
+認証:
+
+```text
+Authorization: Bearer API_KEY
+X-SARA-Timestamp: Unix timestamp
+X-SARA-Signature: HMAC-SHA256
+```
+
+署名対象:
+
+```text
+timestamp + "." + raw_request_body
+```
+
+リプレイ攻撃対策として、時刻差が5分を超える要求は拒否する。
+
+## 13.1 WordPress同期ペイロード
+
+```json
+{
+  "external_system": "wordpress-ai-data-manager",
+  "external_id": "1234",
+  "external_version": "5",
+  "operation": "upsert",
+  "record": {
+    "record_type": "instruction",
+    "title": "サンプルデータ",
+    "language_code": "ja",
+    "status": "draft",
+    "quality_score": 0.8,
+    "content": {
+      "instruction": "質問",
+      "input": "",
+      "output": "回答"
+    },
+    "metadata": {
+      "wordpress_post_id": 1234,
+      "learning_format": "instruction",
+      "category": "science",
+      "difficulty": "medium"
+    }
+  }
+}
+```
+
+レスポンス:
+
+```json
+{
+  "data": {
+    "id": "UUID",
+    "version_id": "UUID",
+    "version_number": 5,
+    "sync_status": "synced"
+  },
+  "meta": {},
+  "error": null
+}
+```
+
+## 13.2 冪等性
+
+同期APIは必ず冪等にする。
+
+以下を一意キーとして扱う。
+
+```text
+external_system
+external_type
+external_id
+external_version
+```
+
+同じ同期要求が複数回来ても、重複バージョンを作成しない。
+
+`Idempotency-Key`ヘッダーにも対応する。
+
+---
+
+# 14. 管理インターフェイス
+
+管理画面はNext.jsで実装する。
+
+## 14.1 画面一覧
+
+```text
+/login
+/dashboard
+
+/records
+/records/new
+/records/[id]
+/records/[id]/edit
+/records/[id]/versions
+/records/[id]/evaluations
+
+/imports
+/imports/new
+/imports/[id]
+
+/exports
+/exports/new
+/exports/[id]
+
+/datasets
+/datasets/new
+/datasets/[id]
+/datasets/[id]/members
+
+/sources
+/sources/[id]
+
+/assets
+/assets/[id]
+
+/memory/events
+/memory/events/[id]
+/memory/experiences
+/memory/experiences/[id]
+/memory/entities
+/memory/entities/[id]
+/memory/concepts
+/memory/concepts/[id]
+/memory/relations
+/memory/graph
+
+/training/models
+/training/runs
+/training/runs/[id]
+
+/settings/users
+/settings/api-keys
+/settings/webhooks
+/settings/integrations
+/settings/system
+/audit
+```
+
+## 14.2 ダッシュボード
+
+表示内容:
+
+```text
+・総レコード数
+・承認済み件数
+・レビュー待ち件数
+・レコードタイプ別件数
+・言語別件数
+・品質スコア分布
+・イベント数
+・概念数
+・関係数
+・直近のインポート
+・直近のエクスポート
+・同期エラー
+・ストレージ使用量
+```
+
+## 14.3 学習データ一覧
+
+必要機能:
+
+```text
+・表形式
+・カード形式
+・ページネーション
+・カーソルページネーション
+・複数条件フィルター
+・保存済み検索条件
+・一括選択
+・一括承認
+・一括却下
+・一括タグ付け
+・一括データセット追加
+・一括エクスポート
+・一括論理削除
+```
+
+一覧列:
+
+```text
+タイトル
+形式
+言語
+状態
+品質
+出典
+タグ
+バージョン
+更新日時
+作成者
+```
+
+## 14.4 データ登録フォーム
+
+最重要画面として実装する。
+
+形式選択に応じて入力欄を切り替える。
+
+### plain_text
+
+```text
+title
+text
+language
+source
+tags
+quality
+```
+
+### instruction
+
+```text
+instruction
+input
+output
+system
+```
+
+### qa
+
+```text
+question
+answer
+context
+```
+
+### chat
+
+```text
+messages[]
+  role
+  content
+  name
+  metadata
+```
+
+### dpo
+
+```text
+prompt
+chosen
+rejected
+```
+
+### image_caption
+
+```text
+image asset
+caption
+negative caption
+objects
+style
+license
+```
+
+### event_sequence
+
+```text
+experience
+events[]
+relations[]
+state_before
+state_after
+reward
+prediction_error
+```
+
+共通機能:
+
+```text
+・自動保存
+・下書き保存
+・プレビュー
+・JSON直接編集
+・JSON Schema検証
+・重複候補表示
+・文字数表示
+・概算トークン数表示
+・出典選択
+・ライセンス入力
+・タグ入力
+・品質評価
+・変更履歴
+・承認フロー
+```
+
+## 14.5 グラフ表示
+
+概念、実体、イベント、関係を可視化する。
+
+初期実装では、表示とフィルターに限定する。
+
+必要機能:
+
+```text
+・開始ノード指定
+・深さ指定
+・関係タイプ指定
+・信頼度閾値
+・強度閾値
+・時間範囲
+・ノード種別表示切替
+・ノード詳細表示
+・関係詳細表示
+```
+
+グラフ上での直接編集は初期実装では任意とする。
+
+---
+
+# 15. 入力バリデーション
+
+すべてのAPI入力をZodで検証する。
+
+検証は以下の順で行う。
+
+```text
+1. Content-Type
+2. リクエストサイズ
+3. 認証
+4. JSON構文
+5. Schema検証
+6. 権限
+7. 外部参照存在確認
+8. 業務ルール
+9. 永続化
+```
+
+学習フォーマットごとにJSON Schemaを定義する。
+
+Schemaにはバージョンを持たせる。
+
+```text
+instruction@1.0
+chat@1.0
+dpo@1.0
+sara-event-sequence@1.0
+```
+
+不明な追加フィールドは`metadata`へ保存可能にする。
+
+重要フィールドに未知の値がある場合はエラーにする。
+
+---
+
+# 16. 権限設計
+
+## admin
+
+```text
+すべての操作
+ユーザー管理
+APIキー管理
+完全削除
+システム設定
+```
+
+## editor
+
+```text
+データ作成
+データ編集
+インポート
+エクスポート
+データセット編集
+```
+
+## reviewer
+
+```text
+閲覧
+評価
+承認
+却下
+コメント
+```
+
+## viewer
+
+```text
+閲覧
+検索
+許可されたエクスポート
+```
+
+## service
+
+```text
+APIキーのscopeに従った機械アクセス
+```
+
+APIキーscope例:
+
+```text
+records:read
+records:write
+records:approve
+datasets:read
+datasets:write
+memory:read
+memory:write
+imports:create
+exports:create
+assets:write
+webhooks:manage
+```
+
+---
+
+# 17. セキュリティ要件
+
+```text
+・パスワードはArgon2id
+・JWTアクセストークンは短寿命
+・Refresh Tokenはローテーション
+・APIキーはハッシュ保存
+・WebhookはHMAC署名
+・CORS許可元を限定
+・SQLは必ずパラメータ化
+・アップロードMIME検査
+・ファイル名をそのままobject keyに使わない
+・SHA-256計算
+・ファイルサイズ制限
+・認証試行回数制限
+・APIレート制限
+・監査ログ
+・個人情報をアプリログへ出さない
+・秘密情報をレスポンスへ含めない
+・スタックトレースを本番で返さない
+```
+
+ユーザー入力HTMLを表示する場合はサニタイズする。
+
+MarkdownのHTML埋め込みは初期値で無効化する。
+
+---
+
+# 18. ログ設計
+
+JSON形式の構造化ログを標準出力へ出す。
+
+最低限のフィールド:
+
+```json
+{
+  "timestamp": "",
+  "level": "info",
+  "service": "api",
+  "request_id": "",
+  "method": "POST",
+  "path": "/api/v1/records",
+  "status": 201,
+  "duration_ms": 35,
+  "user_id": "",
+  "message": ""
+}
+```
+
+以下をログへ出してはならない。
+
+```text
+パスワード
+JWT本体
+APIキー本体
+MinIO secret
+Webhook secret
+学習データ全文
+個人情報を含む本文
+```
+
+---
+
+# 19. エラーハンドリング
+
+共通エラーコード:
+
+```text
+VALIDATION_ERROR
+AUTHENTICATION_REQUIRED
+INVALID_CREDENTIALS
+PERMISSION_DENIED
+RESOURCE_NOT_FOUND
+RESOURCE_CONFLICT
+DUPLICATE_RESOURCE
+VERSION_CONFLICT
+RATE_LIMIT_EXCEEDED
+UPLOAD_TOO_LARGE
+UNSUPPORTED_MEDIA_TYPE
+IMPORT_FAILED
+EXPORT_FAILED
+STORAGE_ERROR
+DATABASE_ERROR
+INTERNAL_ERROR
+```
+
+HTTPステータスを適切に使用する。
+
+```text
+400 入力不正
+401 未認証
+403 権限不足
+404 存在しない
+409 競合
+413 サイズ超過
+415 未対応形式
+422 業務ルール不正
+429 レート制限
+500 内部エラー
+503 依存サービス利用不可
+```
+
+---
+
+# 20. 同時編集とバージョン競合
+
+レコード更新APIは楽観的ロックを使用する。
+
+クライアントは更新時に現在のバージョン番号を送信する。
+
+```json
+{
+  "expected_version": 4,
+  "content": {}
+}
+```
+
+サーバー側の最新バージョンが4でない場合は`409 VERSION_CONFLICT`を返す。
+
+既存データを上書きしない。
+
+管理画面では差分を表示し、以下を選べるようにする。
+
+```text
+・最新を再読み込み
+・自分の変更を新バージョンとして再適用
+・手動マージ
+```
+
+---
+
+# 21. インポート処理詳細
+
+インポートは次のパイプラインで実装する。
+
+```text
+1. ファイルアップロード
+2. SHA-256計算
+3. MIME・拡張子確認
+4. MinIO保存
+5. ジョブ登録
+6. フォーマット判定
+7. ストリーム解析
+8. Schema検証
+9. 重複検査
+10. プレビュー生成
+11. ユーザー確認
+12. トランザクション単位で登録
+13. 結果レポート生成
+```
+
+大規模JSONLをメモリへ全件読み込んではならない。
+
+ストリーム処理する。
+
+1トランザクションの件数を設定可能にする。
+
+初期値:
+
+```text
+500件
+```
+
+エラー戦略を選択可能にする。
+
+```text
+stop_on_error
+skip_invalid
+import_valid_only
+```
+
+---
+
+# 22. エクスポート処理詳細
+
+エクスポート条件をJSONとして保存する。
+
+```json
+{
+  "dataset_id": "UUID",
+  "format": "jsonl",
+  "filters": {
+    "status": "approved",
+    "language_code": "ja"
+  },
+  "include": {
+    "metadata": true,
+    "source": true,
+    "evaluations": false
+  }
+}
+```
+
+エクスポート時点のバージョンを固定する。
+
+生成途中でレコードが更新されても、同じエクスポート内でバージョンが混在しないようにする。
+
+生成物にmanifestを含める。
+
+```json
+{
+  "export_id": "UUID",
+  "created_at": "",
+  "record_count": 1000,
+  "format": "jsonl",
+  "schema_version": "1.0",
+  "filters": {},
+  "sha256": ""
+}
+```
+
+---
+
+# 23. WordPressからの移行
+
+## 23.1 移行対象
+
+既存の以下を対象とする。
+
+```text
+wp_posts
+wp_postmeta
+
+wp_sara_sources
+wp_sara_events
+wp_sara_experiences
+wp_sara_relations
+wp_sara_concepts
+wp_sara_priority
+```
+
+## 23.2 移行スクリプト
+
+配置:
+
+```text
+/scripts/migrate-wordpress.js
+```
+
+接続方法:
+
+```text
+・WordPress REST API
+・WordPress専用エクスポートAPI
+・MySQL直接接続
+```
+
+優先順位:
+
+```text
+1. WordPress REST API
+2. 専用エクスポート
+3. MySQL直接接続
+```
+
+本番データ移行では、MySQL直接接続を必須にしない。
+
+## 23.3 移行マッピング
+
+```text
+WordPress post
+→ dataset.records
+
+post_content JSON
+→ dataset.record_versions.content
+
+learning_* postmeta
+→ dataset.records列またはmetadata
+
+wp_sara_sources
+→ dataset.sources
+
+wp_sara_events
+→ memory.events
+
+wp_sara_experiences
+→ memory.experiences
+
+wp_sara_relations
+→ memory.relations
+
+wp_sara_concepts
+→ memory.concepts
+
+wp_sara_priority
+→ memory.events.priority_scoreまたは別queue
+```
+
+移行後に件数、ハッシュ、欠損を検証する。
+
+移行レポートをJSONで出力する。
+
+---
+
+# 24. バックアップと復元
+
+## 24.1 PostgreSQL
+
+バックアップスクリプト:
+
+```text
+/scripts/backup.sh
+```
+
+以下を実行する。
+
+```text
+pg_dump custom format
+gzipまたは標準圧縮
+日時付きファイル名
+SHA-256生成
+```
+
+復元:
+
+```text
+/scripts/restore.sh
+```
+
+## 24.2 MinIO
+
+PostgreSQLバックアップとMinIOオブジェクト一覧の整合性を確認する。
+
+完全バックアップ時は以下をまとめる。
+
+```text
+PostgreSQL dump
+MinIO data
+manifest.json
+checksums.txt
+```
+
+---
+
+# 25. テスト要件
+
+## 25.1 単体テスト
+
+```text
+・Validation
+・認証
+・権限
+・Record service
+・Version作成
+・重複検査
+・Relation検証
+・フォーマット変換
+・Webhook署名
+```
+
+## 25.2 統合テスト
+
+Docker上の実PostgreSQLを使用する。
+
+```text
+・レコード作成から取得
+・更新時の新バージョン作成
+・競合検出
+・論理削除と復元
+・JSONLインポート
+・データセット生成
+・JSONLエクスポート
+・MinIOアップロード
+・WordPress同期冪等性
+・Webhook再送
+・関係探索
+```
+
+## 25.3 E2Eテスト
+
+管理画面について以下を確認する。
+
+```text
+・ログイン
+・データ登録
+・編集
+・バージョン確認
+・承認
+・検索
+・インポート
+・エクスポート
+・画像アップロード
+・データセット作成
+```
+
+Playwrightを使用してよい。
+
+---
+
+# 26. 性能要件
+
+初期目標:
+
+```text
+レコード数: 100万件
+イベント数: 1000万件
+関係数: 5000万件
+同時管理ユーザー: 20人
+API通常応答: 500ms以内
+単純一覧: 300ms以内
+単一取得: 200ms以内
+```
+
+これは保証値ではなく設計目標とする。
+
+大量データのインポート、エクスポート、Embedding生成は非同期処理にする。
+
+一覧APIで巨大JSONB本文を常に返してはならない。
+
+一覧ではsummaryのみ返し、詳細APIで本文を返す。
+
+---
+
+# 27. OpenAPI
+
+APIサーバーはOpenAPI 3.1仕様を生成する。
+
+```text
+GET /openapi.json
+GET /docs
+```
+
+以下を文書化する。
+
+```text
+・全エンドポイント
+・認証方式
+・scope
+・入力Schema
+・レスポンスSchema
+・エラーSchema
+・例
+```
+
+WordPress、Python、JavaScriptから利用するサンプルを`docs/api.md`へ記載する。
+
+---
+
+# 28. 実装フェーズ
+
+## Phase 1: 基盤
+
+```text
+・monorepo作成
+・Docker Compose
+・PostgreSQL
+・Redis
+・MinIO
+・API skeleton
+・管理画面skeleton
+・healthcheck
+・migration
+```
+
+完了条件:
+
+```text
+docker compose up -dで全サービスが起動
+health/readyが200
+管理画面へアクセス可能
+```
+
+## Phase 2: 認証とユーザー
+
+```text
+・users
+・login
+・JWT
+・refresh token
+・API key
+・role
+・scope
+```
+
+## Phase 3: 学習データ管理
+
+```text
+・records
+・record_versions
+・sources
+・tags
+・annotations
+・evaluations
+・管理画面CRUD
+```
+
+## Phase 4: ファイル管理
+
+```text
+・MinIO
+・assets
+・presigned URL
+・重複検査
+・画像表示
+```
+
+## Phase 5: インポート・エクスポート
+
+```text
+・Redis worker
+・JSONL
+・JSON
+・CSV
+・プレビュー
+・進捗表示
+```
+
+## Phase 6: データセット
+
+```text
+・datasets
+・members
+・split
+・export
+```
+
+## Phase 7: SARA Event Memory
+
+```text
+・events
+・experiences
+・entities
+・concepts
+・relations
+・evidence
+・traverse
+・グラフ表示
+```
+
+## Phase 8: WordPress連携
+
+```text
+・同期API
+・HMAC署名
+・冪等性
+・移行スクリプト
+・同期状態画面
+```
+
+## Phase 9: 学習実験追跡
+
+```text
+・models
+・runs
+・metrics
+・outputs
+```
+
+## Phase 10: 本番化
+
+```text
+・バックアップ
+・復元
+・監査
+・レート制限
+・セキュリティ確認
+・負荷試験
+・運用ドキュメント
+```
+
+---
+
+# 29. Codexへの実装ルール
+
+Codexは以下を厳守すること。
+
+```text
+1. 最初に既存リポジトリ全体を確認する。
+2. 既存コードを無断で大量削除しない。
+3. 各フェーズを小さなコミット単位で実装する。
+4. 変更前に関連ファイルを確認する。
+5. JavaScriptを使用し、TypeScriptを導入しない。
+6. すべてのコードファイル先頭に配置パスを書く。
+7. docker-compose.ymlにversion行を書かない。
+8. 秘密情報をコードへ直書きしない。
+9. SQL文字列連結を行わない。
+10. 重要な更新は必ずトランザクション化する。
+11. 学習データ更新時に旧バージョンを消さない。
+12. APIの互換性を壊す変更を勝手に行わない。
+13. API変更時はOpenAPIとdocsを同時更新する。
+14. DB変更時はmigrationを追加する。
+15. migration済みファイルを後から書き換えない。
+16. エラーを握りつぶさない。
+17. テストを追加する。
+18. npmまたはbun依存追加時は理由を記録する。
+19. 不要な巨大ライブラリを追加しない。
+20. 実装後にREADMEを更新する。
+```
+
+部分修正を報告する際は、以下を明記する。
+
+```text
+・変更したディレクトリ
+・変更したファイル名
+・変更箇所
+・変更理由
+・確認方法
+```
+
+---
+
+# 30. 初回Codexタスク
+
+最初の作業では全機能を一度に実装しない。
+
+以下のみを実装する。
+
+```text
+1. ディレクトリ構造
+2. Docker Compose
+3. PostgreSQL
+4. Redis
+5. MinIO
+6. Bun API
+7. Next.js管理画面
+8. healthcheck
+9. Drizzle migration
+10. auth.users
+11. dataset.sources
+12. dataset.records
+13. dataset.record_versions
+14. ログイン
+15. Record CRUD
+16. バージョン履歴
+17. OpenAPI
+18. 基本テスト
+19. README
+```
+
+初回完了条件:
+
+```text
+docker compose up -dで起動する
+管理者ユーザーをseedできる
+ログインできる
+レコードを登録できる
+レコードを更新すると新バージョンが作られる
+履歴を確認できる
+レコードを論理削除・復元できる
+OpenAPIを表示できる
+テストが成功する
+```
+
+---
+
+# 31. 受け入れ基準
+
+以下をすべて満たした場合に初期版完成とする。
+
+```text
+・Docker Composeのみで起動できる
+・ホスト側にPostgreSQL等の個別インストールが不要
+・永続Volumeが設定されている
+・APIと管理画面が分離されている
+・PostgreSQLが正本である
+・学習データを登録できる
+・複数形式を保存できる
+・変更履歴が失われない
+・JSONLをインポートできる
+・JSONLをエクスポートできる
+・画像をMinIOへ登録できる
+・APIキーで外部アクセスできる
+・WordPressから同期できる
+・イベント、経験、概念、関係を登録できる
+・出典を追跡できる
+・監査ログが残る
+・OpenAPIが生成される
+・テストがある
+・バックアップと復元手順がある
+・READMEのみで新規環境を構築できる
+```
+
+---
+
+# 32. 将来拡張
+
+初期実装完了後、以下を検討する。
+
+```text
+・RISA構造編集エンジン
+・活性伝播
+・関係強度の自動更新
+・時間減衰
+・忘却処理
+・矛盾検出
+・概念結晶化
+・複数LLM間の共通知識サーバー
+・Embeddingモデル複数対応
+・SNNイベントストリーム
+・KafkaまたはNATS
+・Apache Arrow出力
+・Parquetエクスポート
+・データリネージュ可視化
+・OpenTelemetry
+・読み取りレプリカ
+・テーブルパーティショニング
+・PostgreSQL拡張
+```
+
+---
+
+# 33. アーキテクチャ上の最終原則
+
+```text
+WordPress
+＝人間向けの既存管理クライアント
+
+Next.js
+＝新しい標準管理クライアント
+
+SARA Knowledge API
+＝すべての読み書きの入口
+
+PostgreSQL
+＝学習データと認知構造の正本
+
+MinIO
+＝バイナリデータの正本
+
+Redis
+＝一時的なジョブとキャッシュ
+
+SARA Engine
+＝学習と推論
+
+RISA
+＝将来の構造編集・関係形成エンジン
+```
+
+データ保存層と知能アルゴリズムを分離する。
+
+PostgreSQLには事実、仮説、履歴、関係、出典、評価を保存する。
+
+どの知識を活性化し、どの関係を強め、何を忘れるかは、PostgreSQLの外側に置く認知エンジンが担当する。
+
+この分離を崩さないこと。
+
+現在のリポジトリでは、学習データが`post_content`と`post_meta`へ格納され、SARA Event Memoryのみ独自テーブル化されています。したがって、この仕様ではまず既存機能を管理UIとして維持し、独自テーブル部分からPostgreSQLへ切り出す順序にしています。
+
+pgvectorはベクトル検索をPostgreSQLへ追加できますが、ベクトル検索だけを知識構造にせず、明示的な関係テーブルと併用する設計にしています。フィルター付き近傍検索では、データ分布や選択率によってインデックス方式と実行計画の性能が変わるため、初期段階からHNSWへ固定せず、実データで測定して導入する方針が安全です。([arxiv.org][1])
+
+[1]: https://arxiv.org/abs/2602.11443?utm_source=chatgpt.com "Filtered Approximate Nearest Neighbor Search in Vector Databases: System Design and Performance Analysis"
