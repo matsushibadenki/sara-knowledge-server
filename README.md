@@ -1,10 +1,10 @@
 # SARA Knowledge Server
 
-PostgreSQLを正本とする、AI学習データ・イベント記憶・概念・関係データの管理サーバーです。
+This is a management server for AI training data, event memory, concepts, and relationship data, with PostgreSQL as the authoritative source.
 
 ## Phase 1
 
-現在は実装基盤を構築しています。
+Currently building the implementation base.
 
 - [Done] Docker Composeのサービス定義
 - [Done] PostgreSQL / pgvector / Redis / MinIO / Mailpit
