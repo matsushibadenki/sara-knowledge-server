@@ -1,0 +1,22 @@
+{
+  "name": "sara-knowledge-server",
+  "private": true,
+  "version": "0.1.0",
+  "description": "PostgreSQL-based knowledge and memory server for SARA.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "docker compose up --build",
+    "format": "bunx prettier --write .",
+    "test": "bun test",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  },
+  "engines": {
+    "bun": ">=1.1.0",
+    "node": ">=20.0.0"
+  }
+}
