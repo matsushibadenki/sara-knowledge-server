@@ -34,5 +34,5 @@
 - [Later] RISA / SARA Engine連携
 - [Later] WordPress同期、HMAC、冪等性
 - [Later] ベクトル検索、価値駆動学習、Research Queue
+- [Later] フィードバック駆動の構造更新と予測誤差の監査
 - [Later] バックアップ、復元、監査、負荷試験、本番化
-

@@ -22,3 +22,5 @@
 
 - `sara-knowledge-server設計書.txt`: 全体設計仕様書
 - `roadmap.md`: 実装進捗と次工程
+- `late-labeling-and-emergent-concepts.md`: 遅延ラベリングと創発的概念形成の研究仮説
+- `feedback-driven-structural-updates.md`: フィードバック駆動の構造更新方針
