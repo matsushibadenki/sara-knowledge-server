@@ -18,12 +18,15 @@
 
 ## 次の実装
 
-- [Next] Drizzle ORM、スキーマ、migration基盤
-- [Next] `auth.users` と管理者seed
-- [Next] ログイン、JWT、APIキー認証
-- [Next] `dataset.sources`、`dataset.records`、`dataset.record_versions`
-- [Next] Record CRUD、版履歴、論理削除、復元
-- [Next] APIのDB / Redis / MinIO readiness実接続確認
+- [Done] Drizzle ORM、スキーマ、migration基盤
+- [Done] `auth.users`、`dataset.sources`、`dataset.records`、`dataset.record_versions`の初期テーブル
+- [Done] `auth.users` の管理者seed
+- [Done] ログイン、JWTアクセストークン、認証middleware
+- [Done] Refresh TokenのDB保存・ローテーション・logout
+- [Done] APIキーの発行・一覧・失効・scope保存
+- [Next] APIキーによるリクエスト認証とscope認可
+- [Done] Record CRUD、版履歴、論理削除、復元
+- [Done] APIのDB / Redis / MinIO readiness実接続確認
 
 ## 将来の実装
 

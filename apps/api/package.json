@@ -6,10 +6,19 @@
   "scripts": {
     "dev": "bun --watch src/index.js",
     "start": "bun src/index.js",
-    "test": "bun test"
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun src/db/migrate.js",
+    "db:seed": "bun src/db/seed.js"
   },
   "dependencies": {
+    "drizzle-orm": "^0.38.0",
     "hono": "^4.7.0",
+    "jose": "^6.0.0",
+    "postgres": "^3.4.5",
     "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.0"
   }
 }

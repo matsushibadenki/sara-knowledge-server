@@ -12,9 +12,12 @@ Currently building the implementation base.
 - [Done] Next.js管理画面 skeleton
 - [Done] Worker skeleton
 - [Done] API healthcheckとOpenAPI skeleton
-- [Next] Drizzle migrationと初期スキーマ
-- [Next] 認証と管理者seed
-- [Later] Record CRUDとバージョン管理
+- [Done] Drizzle migrationと初期スキーマ
+- [Done] PostgreSQL / Redis / MinIOの実接続readiness
+- [Done] 管理者seedとJWTログイン
+- [Done] Record CRUDとバージョン履歴
+- [Done] Refresh TokenローテーションとAPIキー管理
+- [Next] APIキーによるscope認証
 
 ## 起動
 
@@ -56,4 +59,3 @@ docs/         設計・調査・重要な決定事項
 ## 言語対応
 
 管理画面は日本語を初期表示とし、英語・简体中文を追加できる構成をPhase 2以降で整備します。
-
