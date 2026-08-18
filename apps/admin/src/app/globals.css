@@ -31,12 +31,38 @@ body {
   padding: 56px 0;
 }
 
+.topline {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
 .eyebrow {
-  margin: 0 0 20px;
+  margin: 0;
   color: var(--accent);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.2em;
+}
+
+.language-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.language-picker select {
+  min-height: 36px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  background: var(--card);
+  font: inherit;
 }
 
 h1 {
@@ -83,4 +109,11 @@ h1 {
   border-radius: 50%;
   background: #16a34a;
   box-shadow: 0 0 0 5px rgba(22, 163, 74, 0.12);
+}
+
+@media (max-width: 520px) {
+  .shell { padding-top: 32px; }
+  .hero { padding-top: 32px; }
+  .topline { align-items: flex-start; flex-direction: column; gap: 14px; }
+  .language-picker { width: 100%; justify-content: space-between; }
 }

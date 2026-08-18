@@ -24,7 +24,15 @@ POST   /records/:id/restore
 GET    /records/:id/versions
 ```
 
-すべてBearer access tokenを必要とする。
+すべてBearer認証を必要とする。JWTアクセストークンのほか、必要scopeを持つAPIキーを利用できる。
+
+```text
+GET                         records:read
+POST / PATCH / DELETE      records:write
+restore                    records:write
+```
+
+JWTユーザーの場合、閲覧は`admin / editor / reviewer / viewer`、変更は`admin / editor`に限定する。APIキーの場合はユーザーロールではなくscopeで認可する。
 
 ## 作成
 
@@ -60,6 +68,8 @@ GET    /records/:id/versions
 ```
 
 最新Versionと一致しない場合は`409 VERSION_CONFLICT`を返す。既存Versionは上書きせず、新しいVersionを追加する。
+
+同時更新時は親Recordを行ロックする。DBでも版番号と現在版の一意性を制約し、競合した2要求が同じ次版を作らないようにする。
 
 ## 削除と復元
 
@@ -101,4 +111,3 @@ Docker上のPostgreSQLを使い、以下を確認済み。
 → 論理削除
 → 復元
 ```
-

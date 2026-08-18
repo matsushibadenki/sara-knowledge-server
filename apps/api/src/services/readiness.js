@@ -25,25 +25,40 @@ async function checkMinio() {
 async function checkRedis() {
   const url = new URL(process.env.REDIS_URL || 'redis://localhost:6379');
 
-  try {
-    const socket = await Bun.connect({
+  return new Promise((resolve) => {
+    let settled = false;
+    let socket;
+    const finish = (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket?.end();
+      resolve(status);
+    };
+    const timeout = setTimeout(() => finish('error'), 2_000);
+
+    Bun.connect({
       hostname: url.hostname,
       port: Number(url.port || 6379),
       socket: {
         open(connection) {
+          socket = connection;
           connection.write('PING\r\n');
-          connection.end();
         },
-        data() {},
-        close() {},
-        error() {},
+        data(_connection, data) {
+          finish(new TextDecoder().decode(data).startsWith('+PONG') ? 'ok' : 'error');
+        },
+        close() {
+          finish('error');
+        },
+        error() {
+          finish('error');
+        },
       },
-    });
-    socket.end();
-    return 'ok';
-  } catch {
-    return 'error';
-  }
+    }).then((connection) => {
+      socket = connection;
+    }).catch(() => finish('error'));
+  });
 }
 
 export async function getReadiness() {

@@ -15,6 +15,27 @@
       "when": 1784465156730,
       "tag": "0001_condemned_beyonder",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784620277810,
+      "tag": "0002_fat_rick_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784620694815,
+      "tag": "0003_ensure-postgres-extensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787002506216,
+      "tag": "0004_acoustic_senator_kelly",
+      "breakpoints": true
     }
   ]
 }

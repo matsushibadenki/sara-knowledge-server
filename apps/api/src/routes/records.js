@@ -4,7 +4,7 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/client.js';
 import { recordVersions, records } from '../db/schema/index.js';
-import { requireAuth } from '../auth/middleware.js';
+import { requireAuth, requireRoles, requireScopes } from '../auth/middleware.js';
 
 const recordTypes = [
   'plain_text', 'instruction', 'qa', 'chat', 'sharegpt', 'chatml',
@@ -22,7 +22,7 @@ const recordInputSchema = z.object({
   quality_score: z.number().min(0).max(1).nullable().optional(),
   confidence: z.number().min(0).max(1).nullable().optional(),
   source_id: z.string().uuid().nullable().optional(),
-  content: z.unknown(),
+  content: z.unknown().refine((value) => value !== undefined, 'content is required'),
   plain_text: z.string().nullable().optional(),
   schema_version: z.string().max(50).optional(),
   change_summary: z.string().max(2000).nullable().optional(),
@@ -31,7 +31,19 @@ const recordInputSchema = z.object({
 
 const recordPatchSchema = recordInputSchema.partial().extend({
   expected_version: z.number().int().positive(),
+}).refine(
+  (value) => Object.keys(value).some((key) => key !== 'expected_version'),
+  { message: 'At least one record field must be provided.' },
+);
+
+const listQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.enum(recordStatuses).optional(),
+  record_type: z.enum(recordTypes).optional(),
 });
+
+const uuidSchema = z.string().uuid();
 
 function errorResponse(c, status, code, message, details = []) {
   return c.json({ data: null, meta: {}, error: { code, message, details } }, status);
@@ -95,16 +107,23 @@ async function findRecord(id, includeDeleted = false) {
 const recordsRoutes = new Hono();
 recordsRoutes.use('*', requireAuth);
 
-recordsRoutes.get('/', async (c) => {
-  const page = Math.max(Number(c.req.query('page') || 1), 1);
-  const limit = Math.min(Math.max(Number(c.req.query('limit') || 20), 1), 100);
+recordsRoutes.get('/', requireScopes('records:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const queryResult = listQuerySchema.safeParse({
+    page: c.req.query('page'),
+    limit: c.req.query('limit'),
+    status: c.req.query('status'),
+    record_type: c.req.query('record_type'),
+  });
+  if (!queryResult.success) {
+    return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record query is invalid.', queryResult.error.issues);
+  }
+
+  const { page, limit, status, record_type: recordType } = queryResult.data;
   const offset = (page - 1) * limit;
-  const status = c.req.query('status');
-  const recordType = c.req.query('record_type');
   const conditions = [isNull(records.deletedAt)];
 
-  if (status && recordStatuses.includes(status)) conditions.push(eq(records.status, status));
-  if (recordType && recordTypes.includes(recordType)) conditions.push(eq(records.recordType, recordType));
+  if (status) conditions.push(eq(records.status, status));
+  if (recordType) conditions.push(eq(records.recordType, recordType));
 
   const [items, countResult] = await Promise.all([
     db.select().from(records)
@@ -126,7 +145,7 @@ recordsRoutes.get('/', async (c) => {
   });
 });
 
-recordsRoutes.post('/', async (c) => {
+recordsRoutes.post('/', requireScopes('records:write'), requireRoles('admin', 'editor'), async (c) => {
   const body = await c.req.json().catch(() => null);
   const result = recordInputSchema.safeParse(body);
 
@@ -146,7 +165,7 @@ recordsRoutes.post('/', async (c) => {
       recordType: input.record_type,
       title: input.title ?? null,
       status: input.status || 'draft',
-      currentVersionId: versionId,
+      currentVersionId: null,
       languageCode: input.language_code ?? null,
       qualityScore: input.quality_score ?? null,
       confidence: input.confidence ?? null,
@@ -171,14 +190,21 @@ recordsRoutes.post('/', async (c) => {
       isCurrent: true,
     }).returning();
 
-    return { record, version };
+    const [currentRecord] = await tx.update(records)
+      .set({ currentVersionId: versionId })
+      .where(eq(records.id, recordId))
+      .returning();
+
+    return { record: currentRecord || record, version };
   });
 
   return c.json({ data: serializeRecord(created.record, created.version), meta: {}, error: null }, 201);
 });
 
-recordsRoutes.get('/:id', async (c) => {
-  const record = await findRecord(c.req.param('id'));
+recordsRoutes.get('/:id', requireScopes('records:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const idResult = uuidSchema.safeParse(c.req.param('id'));
+  if (!idResult.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record ID must be a UUID.');
+  const record = await findRecord(idResult.data);
   if (!record) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Record was not found.');
 
   const [version] = await db.select()
@@ -189,8 +215,10 @@ recordsRoutes.get('/:id', async (c) => {
   return c.json({ data: serializeRecord(record, version), meta: {}, error: null });
 });
 
-recordsRoutes.get('/:id/versions', async (c) => {
-  const record = await findRecord(c.req.param('id'));
+recordsRoutes.get('/:id/versions', requireScopes('records:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const idResult = uuidSchema.safeParse(c.req.param('id'));
+  if (!idResult.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record ID must be a UUID.');
+  const record = await findRecord(idResult.data);
   if (!record) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Record was not found.');
 
   const versions = await db.select()
@@ -201,35 +229,35 @@ recordsRoutes.get('/:id/versions', async (c) => {
   return c.json({ data: versions.map(serializeVersion), meta: {}, error: null });
 });
 
-recordsRoutes.patch('/:id', async (c) => {
+recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin', 'editor'), async (c) => {
+  const idResult = uuidSchema.safeParse(c.req.param('id'));
+  if (!idResult.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record ID must be a UUID.');
   const body = await c.req.json().catch(() => null);
   const result = recordPatchSchema.safeParse(body);
   if (!result.success) {
     return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record update is invalid.', result.error.issues);
   }
 
-  const record = await findRecord(c.req.param('id'));
-  if (!record) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Record was not found.');
-
-  const [currentVersion] = await db.select()
-    .from(recordVersions)
-    .where(eq(recordVersions.id, record.currentVersionId))
-    .limit(1);
-
-  if (!currentVersion || currentVersion.versionNumber !== result.data.expected_version) {
-    return errorResponse(c, 409, 'VERSION_CONFLICT', 'Record version is not current.', {
-      expected_version: result.data.expected_version,
-      current_version: currentVersion?.versionNumber || null,
-    });
-  }
-
   const auth = c.get('auth');
   const input = result.data;
   const nextVersionId = crypto.randomUUID();
   const now = new Date();
-  const nextVersionNumber = currentVersion.versionNumber + 1;
-
   const updated = await db.transaction(async (tx) => {
+    const [record] = await tx.select()
+      .from(records)
+      .where(and(eq(records.id, idResult.data), isNull(records.deletedAt)))
+      .limit(1)
+      .for('update');
+    if (!record) return { error: 'not_found' };
+
+    const [currentVersion] = await tx.select()
+      .from(recordVersions)
+      .where(eq(recordVersions.id, record.currentVersionId))
+      .limit(1);
+    if (!currentVersion || currentVersion.versionNumber !== input.expected_version) {
+      return { error: 'conflict', currentVersion: currentVersion?.versionNumber || null };
+    }
+
     await tx.update(recordVersions)
       .set({ isCurrent: false, updatedAt: now })
       .where(eq(recordVersions.id, currentVersion.id));
@@ -237,7 +265,7 @@ recordsRoutes.patch('/:id', async (c) => {
     const [version] = await tx.insert(recordVersions).values({
       id: nextVersionId,
       recordId: record.id,
-      versionNumber: nextVersionNumber,
+      versionNumber: currentVersion.versionNumber + 1,
       schemaVersion: input.schema_version || currentVersion.schemaVersion,
       content: input.content === undefined ? currentVersion.content : input.content,
       plainText: input.plain_text === undefined ? currentVersion.plainText : input.plain_text,
@@ -267,11 +295,23 @@ recordsRoutes.patch('/:id', async (c) => {
     return { record: nextRecord, version };
   });
 
+  if (updated.error === 'not_found') {
+    return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Record was not found.');
+  }
+  if (updated.error === 'conflict') {
+    return errorResponse(c, 409, 'VERSION_CONFLICT', 'Record version is not current.', {
+      expected_version: input.expected_version,
+      current_version: updated.currentVersion,
+    });
+  }
+
   return c.json({ data: serializeRecord(updated.record, updated.version), meta: {}, error: null });
 });
 
-recordsRoutes.delete('/:id', async (c) => {
-  const record = await findRecord(c.req.param('id'));
+recordsRoutes.delete('/:id', requireScopes('records:write'), requireRoles('admin', 'editor'), async (c) => {
+  const idResult = uuidSchema.safeParse(c.req.param('id'));
+  if (!idResult.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record ID must be a UUID.');
+  const record = await findRecord(idResult.data);
   if (!record) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Record was not found.');
 
   const now = new Date();
@@ -283,8 +323,10 @@ recordsRoutes.delete('/:id', async (c) => {
   return c.json({ data: serializeRecord(deleted), meta: {}, error: null });
 });
 
-recordsRoutes.post('/:id/restore', async (c) => {
-  const record = await findRecord(c.req.param('id'), true);
+recordsRoutes.post('/:id/restore', requireScopes('records:write'), requireRoles('admin', 'editor'), async (c) => {
+  const idResult = uuidSchema.safeParse(c.req.param('id'));
+  if (!idResult.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record ID must be a UUID.');
+  const record = await findRecord(idResult.data, true);
   if (!record) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Record was not found.');
   if (!record.deletedAt) return c.json({ data: serializeRecord(record), meta: {}, error: null });
 

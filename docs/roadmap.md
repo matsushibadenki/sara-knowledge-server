@@ -4,7 +4,7 @@
 
 - [Done] monorepoの初期構成
 - [Done] Docker Composeサービス定義
-- [Done] PostgreSQL + pgvector + pgcrypto + pg_trgm + unaccent
+- [Done] PostgreSQL + pgvector + pgcrypto + pg_trgm + unaccent + citext
 - [Done] Redis
 - [Done] MinIOと初期バケット作成
 - [Done] Mailpit
@@ -24,9 +24,16 @@
 - [Done] ログイン、JWTアクセストークン、認証middleware
 - [Done] Refresh TokenのDB保存・ローテーション・logout
 - [Done] APIキーの発行・一覧・失効・scope保存
-- [Next] APIキーによるリクエスト認証とscope認可
+- [Done] APIキーによるリクエスト認証とscope認可
+- [Done] ロール認可とログイン試行回数制限
+- [Next] Source APIとRecordの出典登録フロー
 - [Done] Record CRUD、版履歴、論理削除、復元
+- [Done] Record現在版の外部キー・版番号一意制約・同時更新制御
+- [Done] Record / Version / Refresh Token / APIキーの初期インデックス
 - [Done] APIのDB / Redis / MinIO readiness実接続確認
+- [Done] 許可Origin方式のCORS
+- [Done] 管理画面skeletonの日本語・英語・简体中文表示
+- [Done] lockfile固定のDocker build
 
 ## 将来の実装
 
@@ -38,4 +45,10 @@
 - [Later] WordPress同期、HMAC、冪等性
 - [Later] ベクトル検索、価値駆動学習、Research Queue
 - [Later] フィードバック駆動の構造更新と予測誤差の監査
+- [Later] 構造パターン・適用事例・類似構造のMemory Schema
+- [Later] Structure snapshot・型付きDelta・checkpointのMemory Schema
+- [Later] 類似DeltaからTransformation Patternを抽出
+- [Later] MDLによる基底構造・差分・例外の表現比較
+- [Later] 構造共有による未知relation候補生成とheld-out評価
+- [Later] top-k局所波及、減衰、導出履歴、回帰時取消
 - [Later] バックアップ、復元、監査、負荷試験、本番化

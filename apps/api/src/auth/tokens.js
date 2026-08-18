@@ -3,10 +3,20 @@ import { jwtVerify, SignJWT } from 'jose';
 
 const issuer = 'sara-knowledge-server';
 const audience = 'sara-knowledge-api';
+const developmentSecret = 'development-only-change-me';
 
 function getSecret() {
-  const secret = process.env.JWT_SECRET || 'development-only-change-me';
+  const secret = process.env.JWT_SECRET || developmentSecret;
   return new TextEncoder().encode(secret);
+}
+
+export function validateAuthConfig() {
+  if (process.env.APP_ENV !== 'production') return;
+
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret === developmentSecret || secret === 'change_me' || secret.length < 32) {
+    throw new Error('JWT_SECRET must be a unique value of at least 32 characters in production.');
+  }
 }
 
 function getAccessExpiration() {

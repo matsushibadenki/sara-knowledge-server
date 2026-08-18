@@ -17,7 +17,10 @@ Currently building the implementation base.
 - [Done] 管理者seedとJWTログイン
 - [Done] Record CRUDとバージョン履歴
 - [Done] Refresh TokenローテーションとAPIキー管理
-- [Next] APIキーによるscope認証
+- [Done] APIキーによるscope認証
+- [Done] 管理画面skeletonの日本語・英語・简体中文表示
+- [Done] ユーザーロール認可とログイン試行回数制限
+- [Next] Source APIとRecordの出典登録フロー
 
 ## 起動
 
@@ -58,4 +61,4 @@ docs/         設計・調査・重要な決定事項
 
 ## 言語対応
 
-管理画面は日本語を初期表示とし、英語・简体中文を追加できる構成をPhase 2以降で整備します。
+管理画面は日本語を初期表示とし、英語・简体中文へ切り替えられます。

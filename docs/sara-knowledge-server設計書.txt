@@ -1090,6 +1090,192 @@ expires_at TIMESTAMPTZ NOT NULL
 
 これは長期知識ではなく、一時的な探索記録として扱う。
 
+## 8.9 memory.structural_patterns（将来）
+
+複数の具体的なsubgraphから抽出した、再利用可能な役割・時間・因果・階層パターンを保存する。
+
+```text
+id UUID PRIMARY KEY
+pattern_uid TEXT UNIQUE NOT NULL
+pattern_type TEXT NOT NULL
+canonical_structure JSONB NOT NULL
+variables JSONB NOT NULL DEFAULT '{}'
+constraints JSONB NOT NULL DEFAULT '{}'
+context JSONB NOT NULL DEFAULT '{}'
+support_count BIGINT NOT NULL DEFAULT 0
+counterexample_count BIGINT NOT NULL DEFAULT 0
+confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5
+generalization_score DOUBLE PRECISION NOT NULL DEFAULT 0
+utility_score DOUBLE PRECISION NOT NULL DEFAULT 0
+verification_state TEXT NOT NULL
+proposal_source TEXT NOT NULL
+engine_version TEXT
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
+```
+
+## 8.10 memory.pattern_instances（将来）
+
+構造パターンと具体的な観測・subgraphを接続する。
+
+```text
+id UUID PRIMARY KEY
+pattern_id UUID NOT NULL
+instance_type TEXT NOT NULL
+instance_id UUID
+variable_bindings JSONB NOT NULL
+fit_score DOUBLE PRECISION NOT NULL
+evidence_refs JSONB NOT NULL DEFAULT '[]'
+context JSONB NOT NULL DEFAULT '{}'
+verification_state TEXT NOT NULL
+created_at TIMESTAMPTZ NOT NULL
+```
+
+## 8.11 memory.pattern_similarities（将来）
+
+パターン間の役割的、位相的、時間的、因果的、階層的、文脈的な類似を保存する。
+
+```text
+id UUID PRIMARY KEY
+source_pattern_id UUID NOT NULL
+target_pattern_id UUID NOT NULL
+similarity_type TEXT NOT NULL
+similarity_score DOUBLE PRECISION NOT NULL
+derivation JSONB NOT NULL DEFAULT '{}'
+engine_version TEXT
+created_at TIMESTAMPTZ NOT NULL
+UNIQUE(source_pattern_id, target_pattern_id, similarity_type)
+```
+
+## 8.12 memory.inference_proposals（将来）
+
+構造パターンを別事例へ適用して生成した、まだ確定事実ではないrelation候補を保存する。
+
+```text
+id UUID PRIMARY KEY
+proposal_uid TEXT UNIQUE NOT NULL
+pattern_id UUID NOT NULL
+source_bindings JSONB NOT NULL
+proposed_relation JSONB NOT NULL
+confidence DOUBLE PRECISION NOT NULL
+novelty_score DOUBLE PRECISION NOT NULL DEFAULT 0
+derivation_trace JSONB NOT NULL
+evidence_refs JSONB NOT NULL DEFAULT '[]'
+counterexample_refs JSONB NOT NULL DEFAULT '[]'
+verification_state TEXT NOT NULL
+proposal_source TEXT NOT NULL
+engine_version TEXT
+promoted_relation_id UUID
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+```
+
+推論候補は、検証済みrelationと同じ確度で扱わない。承認後のみ`memory.relations`へ昇格し、導出元proposalへの参照を残す。
+
+## 8.13 memory.structures（将来）
+
+具体経験、抽象構造、materialized checkpointを、不変なcanonical snapshotとして保存する。
+
+```text
+id UUID PRIMARY KEY
+structure_uid TEXT UNIQUE NOT NULL
+structure_kind TEXT NOT NULL
+schema_version TEXT NOT NULL
+canonical_form JSONB NOT NULL
+content_hash TEXT NOT NULL
+context JSONB NOT NULL DEFAULT '{}'
+confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5
+verification_state TEXT NOT NULL
+source_refs JSONB NOT NULL DEFAULT '[]'
+proposal_source TEXT NOT NULL
+engine_version TEXT
+created_at TIMESTAMPTZ NOT NULL
+```
+
+`canonical_form`はノード、関係、役割、時間、文脈、確率、provenanceを表現する。構造比較のために正規化するが、具体的な観測と出典は失わない。
+
+## 8.14 memory.structure_deltas（将来）
+
+二つのStructure間の意味差分を、型付き構造編集演算子列として保存する。
+
+```text
+id UUID PRIMARY KEY
+delta_uid TEXT UNIQUE NOT NULL
+from_structure_id UUID NOT NULL
+to_structure_id UUID NOT NULL
+operations JSONB NOT NULL
+edit_cost DOUBLE PRECISION NOT NULL
+description_length DOUBLE PRECISION
+preconditions JSONB NOT NULL DEFAULT '{}'
+invariants JSONB NOT NULL DEFAULT '{}'
+context JSONB NOT NULL DEFAULT '{}'
+confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5
+verification_state TEXT NOT NULL
+evidence_refs JSONB NOT NULL DEFAULT '[]'
+engine_version TEXT
+created_at TIMESTAMPTZ NOT NULL
+```
+
+演算子は`ADD_NODE`、`REMOVE_NODE`、`ADD_RELATION`、`REMOVE_RELATION`、`CHANGE_ROLE`、`CHANGE_VALUE`、`GENERALIZE`、`SPECIALIZE`、`REORDER_TIME`、`MERGE`、`SPLIT`、`ADD_EXCEPTION`などを型として持つ。単純なJSON差分にはしない。
+
+履歴は一本の差分チェーンではなくDAGとして扱う。長い経路にはcheckpointを作り、適用前条件、適用後hash、復元結果を検証する。
+
+## 8.15 memory.transformation_patterns（将来）
+
+複数Deltaから抽出した、再利用可能な「変化の構造」を保存する。
+
+```text
+id UUID PRIMARY KEY
+transformation_uid TEXT UNIQUE NOT NULL
+transformation_type TEXT NOT NULL
+canonical_operations JSONB NOT NULL
+variables JSONB NOT NULL DEFAULT '{}'
+applicability_constraints JSONB NOT NULL DEFAULT '{}'
+preserved_invariants JSONB NOT NULL DEFAULT '{}'
+support_count BIGINT NOT NULL DEFAULT 0
+counterexample_count BIGINT NOT NULL DEFAULT 0
+confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5
+utility_score DOUBLE PRECISION NOT NULL DEFAULT 0
+verification_state TEXT NOT NULL
+engine_version TEXT
+created_at TIMESTAMPTZ NOT NULL
+updated_at TIMESTAMPTZ NOT NULL
+```
+
+## 8.16 memory.transformation_instances（将来）
+
+Transformation Patternと、その根拠になった具体Deltaを接続する。
+
+```text
+id UUID PRIMARY KEY
+transformation_id UUID NOT NULL
+delta_id UUID NOT NULL
+variable_bindings JSONB NOT NULL DEFAULT '{}'
+fit_score DOUBLE PRECISION NOT NULL
+verification_state TEXT NOT NULL
+created_at TIMESTAMPTZ NOT NULL
+UNIQUE(transformation_id, delta_id)
+```
+
+## 8.17 memory.transformation_relations（将来）
+
+変換同士の類似、因果、順序、合成可能性を保存する。
+
+```text
+id UUID PRIMARY KEY
+source_transformation_id UUID NOT NULL
+target_transformation_id UUID NOT NULL
+relation_type TEXT NOT NULL
+strength DOUBLE PRECISION NOT NULL
+confidence DOUBLE PRECISION NOT NULL
+evidence_refs JSONB NOT NULL DEFAULT '[]'
+created_at TIMESTAMPTZ NOT NULL
+UNIQUE(source_transformation_id, target_transformation_id, relation_type)
+```
+
+この三層は、具体経験、抽象構造、変換知識を表す。`memory.structural_patterns`は再利用可能な状態・関係構造、`memory.transformation_patterns`は構造間の編集パターンを担当し、混同しない。
+
 ---
 
 # 9. trainingスキーマ
@@ -1581,6 +1767,47 @@ POST   /memory/traverse
 ```
 
 レスポンスには探索ノード、エッジ、深さ、探索理由を含める。
+
+## 12.13.1 構造パターンと推論候補（将来）
+
+```text
+GET    /memory/patterns
+POST   /memory/patterns
+GET    /memory/patterns/:id
+PATCH  /memory/patterns/:id
+POST   /memory/patterns/:id/instances
+GET    /memory/patterns/:id/instances
+GET    /memory/patterns/:id/similar
+POST   /memory/patterns/match
+
+GET    /memory/inference-proposals
+GET    /memory/inference-proposals/:id
+POST   /memory/inference-proposals/:id/verify
+POST   /memory/inference-proposals/:id/reject
+POST   /memory/inference-proposals/:id/promote
+
+GET    /memory/structures
+POST   /memory/structures
+GET    /memory/structures/:id
+POST   /memory/structures/:id/checkpoint
+POST   /memory/structures/compare
+
+GET    /memory/structure-deltas
+GET    /memory/structure-deltas/:id
+POST   /memory/structure-deltas/propose
+POST   /memory/structure-deltas/:id/verify
+POST   /memory/structure-deltas/:id/reject
+POST   /memory/structure-deltas/:id/reconstruct
+
+GET    /memory/transformations
+GET    /memory/transformations/:id
+POST   /memory/transformations/match
+POST   /memory/transformations/:id/instances
+```
+
+`promote`は検証済み候補だけを`memory.relations`へ昇格させる。候補生成処理自体はRISAまたはSARA Engineが担当し、Knowledge Serverは導出履歴と検証状態を正本として保持する。
+
+Structure照合、最小差分探索、Transformation抽出、MDL比較もRISA側が担当する。Knowledge Serverはsnapshot、Delta、根拠、反例、検証結果、再構成履歴を正本として保持する。
 
 ## 12.14 検索
 
@@ -2841,6 +3068,14 @@ OpenAPIを表示できる
 ・忘却処理
 ・矛盾検出
 ・概念結晶化
+・構造パターン圧縮と共有
+・パターン適用事例の管理
+・構造共有による未知関係候補生成
+・Structure snapshotと型付きDelta DAG
+・DeltaからのTransformation Pattern抽出
+・checkpointと決定的再構成検証
+・MDLによる共通構造、差分、例外の表現比較
+・held-out relationによる類推評価
 ・複数LLM間の共通知識サーバー
 ・Embeddingモデル複数対応
 ・SNNイベントストリーム
@@ -2881,7 +3116,7 @@ SARA Engine
 ＝学習と推論
 
 RISA
-＝将来の構造編集・関係形成エンジン
+＝将来の構造編集・構造圧縮・共有・関係候補生成エンジン
 ```
 
 データ保存層と知能アルゴリズムを分離する。
@@ -2889,6 +3124,14 @@ RISA
 PostgreSQLには事実、仮説、履歴、関係、出典、評価を保存する。
 
 どの知識を活性化し、どの関係を強め、何を忘れるかは、PostgreSQLの外側に置く認知エンジンが担当する。
+
+RISAを構造保存だけの仕組みとは定義しない。複数の具体例から再利用可能な構造パターンを形成し、新しい事例へ適用して未保存のrelation候補を生成できることを研究目標とする。
+
+RISAの記憶単位は`Memory = Structure + Delta + Transformation`とする。概念は多数の経験間で保存される構造的不変量、学習は新しい経験をより少ない共通構造、差分、例外で説明できるように記憶体系を再編成すること、と研究上定義する。
+
+表現選択にはMinimum Description Lengthの考えを取り入れる。ただし圧縮率だけを目的にせず、復元成功、出典保持、反例保持、未知事例での予測改善を同時に評価する。差分だけを正本にせず、不変snapshot、型付き演算子、checkpointを併存させる。
+
+ただし、生成結果は確定事実ではなく候補である。導出経路、証拠、反例、文脈、生成エンジンとバージョン、検証状態をKnowledge Serverへ保存し、承認後のみrelationへ昇格する。
 
 この分離を崩さないこと。
 

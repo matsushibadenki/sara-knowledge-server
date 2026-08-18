@@ -1,0 +1,2 @@
+ALTER TABLE "auth"."users" ADD CONSTRAINT "users_status_check" CHECK ("auth"."users"."status" IN ('active', 'disabled', 'invited'));--> statement-breakpoint
+ALTER TABLE "auth"."users" ADD CONSTRAINT "users_role_check" CHECK ("auth"."users"."role" IN ('admin', 'editor', 'reviewer', 'viewer', 'service'));

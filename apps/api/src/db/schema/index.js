@@ -1,14 +1,18 @@
 // /apps/api/src/db/schema/index.js
 import {
   boolean,
+  check,
   doublePrecision,
+  index,
   integer,
   jsonb,
   pgSchema,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 const auditColumns = {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -30,7 +34,16 @@ export const users = authSchema.table('users', {
   preferences: jsonb('preferences').notNull().default({}),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   ...auditColumns,
-});
+}, (table) => ({
+  statusCheck: check(
+    'users_status_check',
+    sql`${table.status} IN ('active', 'disabled', 'invited')`,
+  ),
+  roleCheck: check(
+    'users_role_check',
+    sql`${table.role} IN ('admin', 'editor', 'reviewer', 'viewer', 'service')`,
+  ),
+}));
 
 export const refreshTokens = authSchema.table('refresh_tokens', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -41,7 +54,11 @@ export const refreshTokens = authSchema.table('refresh_tokens', {
   replacedById: uuid('replaced_by_id'),
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  userIdIndex: index('refresh_tokens_user_id_idx').on(table.userId),
+  activeExpiryIndex: index('refresh_tokens_active_expiry_idx').on(table.expiresAt)
+    .where(sql`${table.revokedAt} IS NULL`),
+}));
 
 export const apiKeys = authSchema.table('api_keys', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -54,7 +71,11 @@ export const apiKeys = authSchema.table('api_keys', {
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  userIdIndex: index('api_keys_user_id_idx').on(table.userId),
+  activeExpiryIndex: index('api_keys_active_expiry_idx').on(table.expiresAt)
+    .where(sql`${table.revokedAt} IS NULL`),
+}));
 
 export const sources = datasetSchema.table('sources', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -79,7 +100,7 @@ export const records = datasetSchema.table('records', {
   recordType: text('record_type').notNull(),
   title: text('title'),
   status: text('status').notNull().default('draft'),
-  currentVersionId: uuid('current_version_id'),
+  currentVersionId: uuid('current_version_id').references(() => recordVersions.id),
   languageCode: text('language_code'),
   qualityScore: doublePrecision('quality_score'),
   confidence: doublePrecision('confidence'),
@@ -89,7 +110,14 @@ export const records = datasetSchema.table('records', {
   externalId: text('external_id'),
   metadata: jsonb('metadata').notNull().default({}),
   ...auditColumns,
-});
+}, (table) => ({
+  activeUpdatedIndex: index('records_active_updated_idx').on(table.updatedAt)
+    .where(sql`${table.deletedAt} IS NULL`),
+  statusIndex: index('records_status_idx').on(table.status),
+  recordTypeIndex: index('records_record_type_idx').on(table.recordType),
+  sourceIdIndex: index('records_source_id_idx').on(table.sourceId),
+  ownerIdIndex: index('records_owner_id_idx').on(table.ownerId),
+}));
 
 export const recordVersions = datasetSchema.table('record_versions', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -104,4 +132,11 @@ export const recordVersions = datasetSchema.table('record_versions', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   isCurrent: boolean('is_current').notNull().default(false),
-});
+}, (table) => ({
+  recordVersionUnique: uniqueIndex('record_versions_record_version_unique')
+    .on(table.recordId, table.versionNumber),
+  oneCurrentVersionPerRecord: uniqueIndex('record_versions_one_current_unique')
+    .on(table.recordId)
+    .where(sql`${table.isCurrent} = true AND ${table.deletedAt} IS NULL`),
+  recordIdIndex: index('record_versions_record_id_idx').on(table.recordId),
+}));
