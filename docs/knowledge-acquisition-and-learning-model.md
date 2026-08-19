@@ -137,4 +137,6 @@ LLM学習データ管理機能は維持するが、それと並行してイベ�
 
 構造記憶は、完成グラフの複製だけではなく、`Structure + Delta + Transformation`として扱う。多数の経験から共通する役割構造をStructureとして抽出し、個別差を型付きDeltaとして残し、反復するDeltaからTransformation Patternを形成する。
 
+ただし、共通構造を人間定義の型や明示的なgraph matchingだけで抽出するとは限らない。局所Unitを複数経験が再利用し、その重なりが安定して予測・圧縮・転移へ寄与したとき、名前のない概念候補として扱う自己組織化経路も比較する。自己組織化Unitは学習・活性の内部表現、StructureとDeltaは出典追跡・検証・取消のための明示表現として併存させる。
+
 表現の再編成では、共通構造、個別binding、差分、例外、復元誤差の記述長を比較する。圧縮のために反例や出典を失うことは禁止し、詳細は`structure-delta-transformation-memory.md`に定める。

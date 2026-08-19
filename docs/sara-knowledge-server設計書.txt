@@ -1276,6 +1276,69 @@ UNIQUE(source_transformation_id, target_transformation_id, relation_type)
 
 この三層は、具体経験、抽象構造、変換知識を表す。`memory.structural_patterns`は再利用可能な状態・関係構造、`memory.transformation_patterns`は構造間の編集パターンを担当し、混同しない。
 
+## 8.18 自己組織化共有表現（将来・実験後に確定）
+
+RISAは、完成したStructure同士を比較してから共通パターンへ分類する経路だけに依存しない。複数経験が同じ局所Unitを再利用し、その重なりが予測、圧縮、転移へ寄与した結果として、名前のない構造候補が形成される経路を持つ。
+
+```text
+Experience A = {P1, P7, P13} + residual A
+Experience B = {P1, P7, P92} + residual B
+
+共有部分 = {P1, P7}
+個別部分 = {P13}, {P92}, residual
+```
+
+Unitは人間定義のrelationだけに限定しない。役割、時間、空間、状態遷移、複数modalityの共起、時空間活動、他Unitの組合せを表現候補とする。言語ラベルは任意の後付け属性にする。
+
+暗黙共有を唯一の正本にはしない。元経験、出典、不変snapshotを保持し、共有状態から監査可能なStructure、型付きDelta、Transformation候補を生成できるようにする。
+
+以下はtoy experimentで有効性を確認した後に確定する保存候補であり、現時点ではmigrationへ追加しない。
+
+## 8.19 memory.representation_units（将来候補）
+
+```text
+unit_uid TEXT UNIQUE NOT NULL
+unit_kind TEXT NOT NULL
+level INTEGER NOT NULL
+representation JSONB NOT NULL
+content_hash TEXT
+status TEXT NOT NULL
+confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5
+proposal_source TEXT NOT NULL
+engine_version TEXT NOT NULL
+created_at TIMESTAMPTZ NOT NULL
+```
+
+## 8.20 memory.experience_unit_bindings（将来候補）
+
+```text
+experience_type TEXT NOT NULL
+experience_id UUID NOT NULL
+unit_id UUID NOT NULL
+role TEXT
+activation DOUBLE PRECISION
+binding_strength DOUBLE PRECISION NOT NULL
+temporal_offset DOUBLE PRECISION
+spatial_context JSONB NOT NULL DEFAULT '{}'
+residual_ref JSONB
+evidence_refs JSONB NOT NULL DEFAULT '[]'
+```
+
+## 8.21 memory.unit_compositions（将来候補）
+
+```text
+parent_unit_id UUID NOT NULL
+child_unit_id UUID NOT NULL
+composition_role TEXT
+position_or_order INTEGER
+weight DOUBLE PRECISION NOT NULL
+context JSONB NOT NULL DEFAULT '{}'
+```
+
+## 8.22 memory.unit_statistics / memory.unit_labels（将来候補）
+
+Unitの利用回数、異なる文脈数、予測利得、圧縮利得、転移性能、安定性、最終活性時刻を保存する。ラベルはUnit本体から分離し、言語、説明、付与元、検証状態を持たせる。人間が意味を理解できないUnitは`latent-{uid}`として保持し、頻出だけを理由に確定知識へ昇格させない。
+
 ---
 
 # 9. trainingスキーマ
@@ -1803,11 +1866,21 @@ GET    /memory/transformations
 GET    /memory/transformations/:id
 POST   /memory/transformations/match
 POST   /memory/transformations/:id/instances
+
+GET    /memory/representation-units
+GET    /memory/representation-units/:id
+GET    /memory/representation-units/:id/experiences
+GET    /memory/representation-units/:id/statistics
+POST   /memory/representation-units/:id/labels
+POST   /memory/representation-units/:id/verify
+POST   /memory/representation-units/:id/reject
 ```
 
 `promote`は検証済み候補だけを`memory.relations`へ昇格させる。候補生成処理自体はRISAまたはSARA Engineが担当し、Knowledge Serverは導出履歴と検証状態を正本として保持する。
 
 Structure照合、最小差分探索、Transformation抽出、MDL比較もRISA側が担当する。Knowledge Serverはsnapshot、Delta、根拠、反例、検証結果、再構成履歴を正本として保持する。
+
+局所Unitの割当、疎な競合、Assembly形成、予測、分裂・統合・休眠もRISA側が担当する。Knowledge ServerはUnit snapshot、具体経験とのbinding、統計、ラベル、出典、生成バージョンを保存する。Unit APIは研究プロトタイプで有効性を確認した後に確定する。
 
 ## 12.14 検索
 
@@ -3076,6 +3149,10 @@ OpenAPIを表示できる
 ・checkpointと決定的再構成検証
 ・MDLによる共通構造、差分、例外の表現比較
 ・held-out relationによる類推評価
+・局所Unit再利用とresidual保持
+・共活性からの階層的Assembly形成
+・名前のないlatent Unitの予測利得と交絡耐性評価
+・自己組織化共有表現から監査用Structure・Deltaへの投影
 ・複数LLM間の共通知識サーバー
 ・Embeddingモデル複数対応
 ・SNNイベントストリーム
@@ -3127,9 +3204,15 @@ PostgreSQLには事実、仮説、履歴、関係、出典、評価を保存す�
 
 RISAを構造保存だけの仕組みとは定義しない。複数の具体例から再利用可能な構造パターンを形成し、新しい事例へ適用して未保存のrelation候補を生成できることを研究目標とする。
 
+構造パターンは、人間が同じ構造だと先に分類した結果だけから形成しない。複数の経験が同じ局所Unitを部分的に再利用し、その共有が安定して予測、圧縮、転移へ寄与した結果を、名前のない概念候補として扱う。人間語彙へ割り当てられないUnitも保持できるようにする。
+
+ただし自己組織化という表現で学習則を省略しない。Unitの割当、競合、新規生成、統合、分裂、休眠には明示的なアルゴリズムと評価が必要であり、representation collapse、過剰分裂、交絡学習を失敗条件として監視する。
+
 RISAの記憶単位は`Memory = Structure + Delta + Transformation`とする。概念は多数の経験間で保存される構造的不変量、学習は新しい経験をより少ない共通構造、差分、例外で説明できるように記憶体系を再編成すること、と研究上定義する。
 
 表現選択にはMinimum Description Lengthの考えを取り入れる。ただし圧縮率だけを目的にせず、復元成功、出典保持、反例保持、未知事例での予測改善を同時に評価する。差分だけを正本にせず、不変snapshot、型付き演算子、checkpointを併存させる。
+
+自己組織化Unitは学習・活性の内部表現、Structure・Delta・Transformationは監査・交換の明示表現とする。どちらか一方だけを正解とせず、元経験と出典から再評価可能にする。
 
 ただし、生成結果は確定事実ではなく候補である。導出経路、証拠、反例、文脈、生成エンジンとバージョン、検証状態をKnowledge Serverへ保存し、承認後のみrelationへ昇格する。
 

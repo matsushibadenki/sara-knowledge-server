@@ -17,6 +17,8 @@ Learning
 
 構造を完成済みグラフとして毎回複製せず、共通構造と差分を共有する。ただし、差分だけを正本にして長いチェーンを復元する方式にはしない。不変スナップショット、出典、型付き差分、checkpointを併存させる。
 
+共通構造は、明示的なgraph matchingだけで抽出するとは限らない。経験が同じ局所Unitを参照した結果として共有部分が形成される自己組織化経路も持つ。この場合、型付きDeltaは学習の唯一の内部表現ではなく、版変更、二時点比較、説明、取消、監査のために生成する派生表現となる。詳細は`self-organizing-shared-representations.md`を参照する。
+
 ## 三層の記憶
 
 ```text
@@ -261,6 +263,8 @@ evidence_refs
 前回設計した`structural_patterns`はLayer 2、今回の`transformation_patterns`はLayer 3を担当する。
 
 ## 新しい入力の統合アルゴリズム
+
+以下は明示的なStructure比較経路である。これとは別に、局所Unitの再利用とresidual割当による自己組織化経路を比較実装する。
 
 ```text
 1. 原文・観測・出典を失わず保存

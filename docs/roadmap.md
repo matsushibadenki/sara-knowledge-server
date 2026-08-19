@@ -50,5 +50,8 @@
 - [Later] 類似DeltaからTransformation Patternを抽出
 - [Later] MDLによる基底構造・差分・例外の表現比較
 - [Later] 構造共有による未知relation候補生成とheld-out評価
+- [Later] 局所Unit再利用・residual・Assembly形成の自己組織化プロトタイプ
+- [Later] 名前のないlatent Unitの安定性・予測利得・交絡耐性評価
+- [Later] 自己組織化共有表現から監査用Structure／Deltaへの投影
 - [Later] top-k局所波及、減衰、導出履歴、回帰時取消
 - [Later] バックアップ、復元、監査、負荷試験、本番化

@@ -29,3 +29,4 @@
 - `feedback-driven-structural-updates.md`: フィードバック駆動の構造更新方針
 - `structural-knowledge-emergence.md`: 構造共有・再利用・未知関係候補生成の研究設計
 - `structure-delta-transformation-memory.md`: Structure・型付き差分・変換知識・MDLの記憶設計
+- `self-organizing-shared-representations.md`: 局所表現の再利用から概念候補が形成される自己組織化設計
