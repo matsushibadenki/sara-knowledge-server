@@ -313,6 +313,8 @@ SARA Knowledge Server
 
 Knowledge Serverは、RISAが提案した最小差分を無検証で採用しない。アルゴリズムとバージョンを記録し、別アルゴリズムで再評価可能にする。
 
+StructureとTransformationの候補は、明示的なgraph matchingに加えて、再生時の予測誤差、競合、Replay耐性から動的支持を評価できる。ただし動的支持だけで`verified`へ昇格させない。詳細は`dynamical-structural-validation.md`を参照する。
+
 ## 評価指標
 
 - 元構造の再構成成功率

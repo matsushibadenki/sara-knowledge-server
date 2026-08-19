@@ -80,6 +80,6 @@ docker compose exec api bun run db:migrate
 
 ## 将来のMemory Schema
 
-Structure、型付きDelta、Transformation Pattern、自己組織化する共有Unitは設計採用済みだが、現在のmigrationにはまだ追加しない。出典追跡と監査の基盤を先に完成させる。
+Structure、型付きDelta、Transformation Pattern、自己組織化する共有Unit、力学的なStability ProfileとReplay履歴は設計採用済みだが、現在のmigrationにはまだ追加しない。出典追跡と監査の基盤を先に完成させる。
 
-StructureとDeltaの将来スキーマは`structure-delta-transformation-memory.md`、共有Unitの実験設計は`self-organizing-shared-representations.md`を参照する。Unitスキーマはtoy experimentで有効性を確認してから確定する。
+StructureとDeltaの将来スキーマは`structure-delta-transformation-memory.md`、共有Unitの実験設計は`self-organizing-shared-representations.md`、動的検証は`dynamical-structural-validation.md`を参照する。UnitとStability関連スキーマはtoy experimentで有効性を確認してから確定する。

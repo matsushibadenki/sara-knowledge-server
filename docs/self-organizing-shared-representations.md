@@ -36,6 +36,8 @@ Experience / Structure / Delta / Transformation
 
 学習・活性層では、同じ局所Unitを複数経験が参照することで重なりを形成する。監査・交換層では、その時点の共有状態から明示的なStructure、差分、変換候補を生成し、再現可能な形で保存する。
 
+UnitやAssemblyの維持判断には、頻度だけでなく、再生時の予測誤差、競合、恒常性制約、Replay後の安定性を利用する。力学的安定性の設計は`dynamical-structural-validation.md`を参照する。
+
 暗黙共有を唯一の正本にはしない。元のRecord、Event、Asset、出典、不変snapshotを失わない。
 
 ## 基本表現

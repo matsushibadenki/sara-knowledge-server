@@ -72,6 +72,12 @@ Experience → Structure → Delta → Transformation
 
 名前のないUnitは、頻出という理由だけで知識とみなしません。held-out予測、転移、圧縮、検索などへの再現可能な寄与と、交絡への耐性を評価します。
 
+### 構造は正誤だけでなく安定性も検証する
+
+構造候補を毎回高性能なVerifierだけで判定せず、再生時の予測誤差、共有部分の共鳴、排他的分岐の競合、恒常性、Event MemoryからのReplayを用いて低コストに支持度を更新します。
+
+ただし、安定した構造が真実とは限りません。力学的安定性、独立した証拠、外部検証を別の尺度として保持し、高リスクな判断や事実確認では人間・ルール・外部資料を併用します。
+
 ## 関連プロジェクトとの責務
 
 ```text
@@ -154,6 +160,7 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Later] Event、Experience、Concept、Entity、Relation
 - [Later] Structure、Delta、TransformationのMemory Schema
 - [Later] 自己組織化Unit、residual、Assemblyの研究プロトタイプ
+- [Later] 予測誤差・競合・恒常性・Replayによる構造検証
 - [Later] 構造共有からの未知relation候補生成とheld-out評価
 - [Later] 価値駆動学習、Research Queue、夜間バッチ
 - [Later] バックアップ、復元、監査、負荷試験、本番化
@@ -316,6 +323,7 @@ packages/      将来の共有パッケージ
 - [構造共有による知識創発](docs/structural-knowledge-emergence.md)
 - [Structure・Delta・Transformation記憶モデル](docs/structure-delta-transformation-memory.md)
 - [自己組織化する共有表現](docs/self-organizing-shared-representations.md)
+- [力学的な構造検証](docs/dynamical-structural-validation.md)
 
 重要な設計判断は、会話内だけに残さず`docs/`へ保存します。実装と将来設計に差がある場合は、ドキュメント内で`[Done]`、`[Next]`、`[Later]`または「将来候補」として区別します。
 
