@@ -116,6 +116,8 @@ current state
 
 UnitとFactorは同一とは限らない。latent Unitの組合せが一つのFactorへ投影される場合も、一つのUnitが複数Factor候補に関与する場合もある。監査層では元のStructure、binding、出典へ戻れることを要求する。
 
+Factorを複数modalityで共有する条件、native valueとresidualの境界、cross-modal transfer評価は`cross-modal-structural-abstraction.md`に定める。
+
 ## 推論パイプライン候補
 
 ```text

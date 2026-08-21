@@ -59,6 +59,12 @@
 - [Later] 構造合成推論と検索・RAG・graph traversal・LLMの比較
 - [Later] 10³→10⁵→10⁷ Factor候補の段階的scale試験
 - [Later] Factorization・Composition Proposal・Reasoning TraceのMemory Schema
+- [Later] 共通潜在過程を文章・animation・音記号・触覚時系列へ描画するtoy dataset
+- [Later] native値・modality固有構造・cross-modal Factor・residualの最小表現
+- [Later] modality別・shared Embedding・typed Factorのcross-modal baseline比較
+- [Later] held-out modality pair・hard negative・alignmentずれ・leakage耐性評価
+- [Later] Factor applicability profileとcross-modal transfer evaluation
+- [Later] alignment・modality binding・transfer履歴のMemory Schema
 - [Later] 局所Unit再利用・residual・Assembly形成の自己組織化プロトタイプ
 - [Later] 名前のないlatent Unitの安定性・予測利得・交絡耐性評価
 - [Later] 自己組織化共有表現から監査用Structure／Deltaへの投影

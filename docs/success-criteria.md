@@ -114,6 +114,19 @@ Knowledge Server
 
 構造候補は、独立した知的Verifierだけでなく、予測誤差、分岐競合、恒常性、Replayを用いて低コストに選別できることを目指す。ただし動的安定性を真実と同一視せず、外部検証状態と分離する。環境変化に適応しながら、少数例と反例を保持できることを成功条件に含める。
 
+### 第六段階：クロスモーダル構造転移
+
+文章、映像、音・音楽、触覚のnative valueと固有residualを保持しながら、一つのモダリティで得たFactorを別のモダリティへ適用する。
+
+```text
+Source modalityのStructure
+→ cross-modal Factor候補
+→ Target modalityへのbinding
+→ Targetのheld-out予測・再構成・行動
+```
+
+表面波形、Embedding、収録時刻が似るだけでは成功とみなさない。Target modalityだけで学習したbaselineより予測または制御を改善し、hard negative、alignmentずれ、dataset leakageへの耐性を示し、元観測・segment・出典・residualへ戻れることを成功条件とする。
+
 ### 最終段階：持続的なAI記憶
 
 SARAや他のAIがKnowledge Serverを使うことで、モデル単体や通常のRAGよりも次の点で優れることを目指す。
@@ -173,6 +186,13 @@ SARAや他のAIがKnowledge Serverを使うことで、モデル単体や通常�
 - Replay後の回帰率
 - 正しい低頻度構造の保持率
 - 力学的検証による人間・LLMレビュー削減量
+- cross-modal Factor alignment精度
+- Target modalityにおける予測・再構成利得
+- held-out modality pairへの転移成功率
+- modality固有residual保持率
+- hard negativeの誤共有率
+- Factor applicability profileの較正誤差
+- alignmentずれとdataset leakageへの耐性
 
 ## 比較評価
 

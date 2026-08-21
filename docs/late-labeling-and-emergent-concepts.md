@@ -142,8 +142,10 @@ RISAは知識を重みだけでなく、関係構造として保持・更新す�
 
 - クラスタ分裂・融合・休眠
 - 概念階層の自動形成
-- 動画・音声・テキスト間の概念対応
+- 動画・音声・テキスト・触覚間の概念対応とcross-modal予測利得
 - 名前のない概念の検索と可視化
 - 人間の少数ラベルによる概念同定
 - 概念候補からイベント予測への利用
 - RISAの関係更新とKnowledge Serverの履歴管理の分離
+
+cross-modal対応では、Embeddingが近いことや時間同期だけで概念を統合しない。モダリティ固有値とresidualを残し、Target modalityのheld-out予測を改善するかで共有Factor候補を評価する。詳細は`cross-modal-structural-abstraction.md`を参照する。

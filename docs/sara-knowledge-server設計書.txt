@@ -3263,6 +3263,14 @@ RISAの追加研究テーマとしてStructural FactorizationとCompositional Re
 
 成功条件は、登録時に存在しないFactorの組合せを要求するheld-out問題で、保存済み回答の検索、通常のgraph traversal、RAG、LLMなどのbaselineを超え、導出経路、binding、制約、出典を再現できることである。toy experimentで有効性を確認する前にFactorization関連のDB Schemaを固定しない。
 
+文章、映像、音・音楽、触覚の関係・変換を共有できる可能性はCross-modal Structural Abstractionとして研究する。ただし、検証前からUniversal Structure Spaceの存在を前提にしない。入力座標、単位、sensor calibration、時間解像度、文化・身体条件などのnative valueとmodality-specific Structureを保持し、共有Factorで説明できないresidualを破棄しない。
+
+cross-modal Factor候補は、Embeddingや表面軌跡が似るだけでは採用しない。Source modalityで得たFactorをTarget modalityへbindingしたとき、Target単独baselineに対してheld-out予測、再構成、行動選択のいずれかを改善し、hard negative、alignmentずれ、dataset leakageの検査を通過することを要求する。
+
+Factorの所属はuniversal／specificの二値へ固定せず、modality、domain、文化、身体条件ごとのsupport、counterexample、predictive gain、transfer scoreを持つapplicability profileとして扱う。文章・animation・音記号・simulated触覚時系列を同じ既知の潜在過程から生成するtoy benchmarkで比較した後、小規模な実データへ進む。
+
+効果確認前にcross-modal関連のDB Schemaを固定しない。有効性が確認された場合、Asset本体はMinIO、observation、segment、alignment、Factor binding、applicability profile、transfer evaluation、出典とengine versionはPostgreSQLを正本とする。
+
 構造候補は、予測誤差、共鳴、競合、恒常性、Replay耐性によって動的支持を更新できるようにする。ただし、安定性は真実ではない。頻出する誤りや交絡も安定し得るため、動的支持、独立証拠、外部検証を別状態として保存し、高リスク領域では人間・ルール・外部資料による確認を必要とする。
 
 StabilityやValueの補助scoreには、単調性、convexity、特徴影響上限を構築時に保証できるモデルを比較する。Spectral Neuronはその候補の一つとするが、RISAの基本記憶単位、汎用Verifier、生物学的ニューロンとはみなさない。使用時はeigengap、eigenspace projector、spectral normなどの基底不変量を監査し、密な固有値計算の費用と単純baselineとの差を測定する。

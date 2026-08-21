@@ -78,6 +78,10 @@ RISAの将来研究では、未知問題を再利用可能な関係・役割・�
 
 構造の「素因数」は絶対的な最小単位ではなく、あるタスクと計算予算で再構成・予測・転移へ寄与するPrimitive候補として扱います。複数の分解候補を許し、元経験、出典、反例へ戻れることを維持します。
 
+### モダリティ固有値を残したまま共有構造を探す
+
+文章、映像、音・音楽、触覚を同じ生データへ変換するのではなく、専用Encoder／Decoderと固有residualを維持します。別モダリティへ移したFactorがheld-out予測や再構成を改善した場合だけcross-modal候補とし、表面的な波形やEmbeddingの類似だけでは普遍構造と認定しません。
+
 ### 構造は正誤だけでなく安定性も検証する
 
 構造候補を毎回高性能なVerifierだけで判定せず、再生時の予測誤差、共有部分の共鳴、排他的分岐の競合、恒常性、Event MemoryからのReplayを用いて低コストに支持度を更新します。
@@ -340,6 +344,7 @@ packages/      将来の共有パッケージ
 - [自己組織化する共有表現](docs/self-organizing-shared-representations.md)
 - [力学的な構造検証](docs/dynamical-structural-validation.md)
 - [構造因数分解と構造合成推論](docs/structural-factorization-and-compositional-reasoning.md)
+- [クロスモーダル構造抽象化](docs/cross-modal-structural-abstraction.md)
 
 重要な設計判断は、会話内だけに残さず`docs/`へ保存します。実装と将来設計に差がある場合は、ドキュメント内で`[Done]`、`[Next]`、`[Later]`または「将来候補」として区別します。
 

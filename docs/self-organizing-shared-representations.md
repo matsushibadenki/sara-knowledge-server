@@ -40,6 +40,8 @@ UnitやAssemblyの維持判断には、頻度だけでなく、再生時の予�
 
 反復利用されるUnitまたはAssemblyはStructural Factorの候補になり得るが、両者を同一視しない。Factorとして採用するには、分解後の再構成、held-out composition、別領域転移、探索費用を評価する。構造因数分解の設計は`structural-factorization-and-compositional-reasoning.md`を参照する。
 
+複数modalityで活性化するUnitも、由来が異なるだけで共通構造とはみなさない。Source modalityで得たFactorがTarget modalityの予測へ寄与し、固有residualと反例を保持できる場合にcross-modal候補とする。詳細は`cross-modal-structural-abstraction.md`を参照する。
+
 暗黙共有を唯一の正本にはしない。元のRecord、Event、Asset、出典、不変snapshotを失わない。
 
 ## 基本表現
