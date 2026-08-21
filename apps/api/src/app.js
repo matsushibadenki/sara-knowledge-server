@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { getReadiness } from './services/readiness.js';
 import authRoutes from './routes/auth.js';
 import recordsRoutes from './routes/records.js';
+import sourcesRoutes from './routes/sources.js';
 
 const app = new Hono();
 const allowedOrigins = new Set(
@@ -110,6 +111,18 @@ app.get('/openapi.json', (c) => c.json({
     '/records/{id}/restore': {
       post: { summary: 'Restore a soft-deleted record', security: [{ bearerAuth: [] }], 'x-required-scope': 'records:write', 'x-allowed-user-roles': ['admin', 'editor'] },
     },
+    '/sources': {
+      get: { summary: 'List sources', security: [{ bearerAuth: [] }], 'x-required-scope': 'sources:read', 'x-allowed-user-roles': ['admin', 'editor', 'reviewer', 'viewer'] },
+      post: { summary: 'Create a source', security: [{ bearerAuth: [] }], 'x-required-scope': 'sources:write', 'x-allowed-user-roles': ['admin', 'editor'] },
+    },
+    '/sources/{id}': {
+      get: { summary: 'Get a source and its active record usage count', security: [{ bearerAuth: [] }], 'x-required-scope': 'sources:read', 'x-allowed-user-roles': ['admin', 'editor', 'reviewer', 'viewer'] },
+      patch: { summary: 'Update a source', security: [{ bearerAuth: [] }], 'x-required-scope': 'sources:write', 'x-allowed-user-roles': ['admin', 'editor'] },
+      delete: { summary: 'Soft delete a source while retaining record provenance', security: [{ bearerAuth: [] }], 'x-required-scope': 'sources:write', 'x-allowed-user-roles': ['admin', 'editor'] },
+    },
+    '/sources/{id}/restore': {
+      post: { summary: 'Restore a soft-deleted source', security: [{ bearerAuth: [] }], 'x-required-scope': 'sources:write', 'x-allowed-user-roles': ['admin', 'editor'] },
+    },
   },
 }));
 
@@ -117,5 +130,7 @@ app.route('/auth', authRoutes);
 app.route('/api/v1/auth', authRoutes);
 app.route('/records', recordsRoutes);
 app.route('/api/v1/records', recordsRoutes);
+app.route('/sources', sourcesRoutes);
+app.route('/api/v1/sources', sourcesRoutes);
 
 export default app;

@@ -49,8 +49,10 @@ PostgreSQLの初期化時と冪等migrationで以下を有効化する。既存v
 - `is_current = true`の有効なVersionはRecordごとに1件だけ許可する
 - Record更新では親Recordを行ロックし、`expected_version`の比較とVersion追加を同一トランザクションで行う
 - `sources`は出典・ライセンス・取得情報を保持する
+- Sourceの`source_type`はAPIとDB CHECK制約の両方で検証する
+- 新しいRecord関連付けでは論理削除されていないSourceだけを許可し、既存Recordの出典参照はSource論理削除後も保持する
 - APIでは連番IDを公開せず、UUIDを使用する
-- Record、Version、Refresh Token、APIキーの主要検索条件にはインデックスを設定する
+- Record、Version、Source、Refresh Token、APIキーの主要検索条件にはインデックスを設定する
 
 ## コマンド
 
@@ -75,8 +77,8 @@ docker compose exec api bun run db:migrate
 - [Done] 現在版参照、版番号、現在版一意性の整合性
 - [Done] 初期一覧検索用インデックス
 - [Done] user status / roleのCHECK制約と初期権限モデル
-- [Next] Source APIとRecordの出典登録フロー
-- [Later] 監査ログ
+- [Done] Source APIとRecordの出典登録フロー
+- [Next] Source・Record変更の監査ログ
 
 ## 将来のMemory Schema
 

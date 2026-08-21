@@ -3192,6 +3192,8 @@ OpenAPIを表示できる
 ・予測誤差、競合、恒常性によるStability Profile
 ・Event Memoryからのsandbox Replay
 ・力学的検証とLLM Verifierの比較
+・Spectral Neuronによる制約付きStability・Value scorerの比較実験
+・eigengapと基底不変量による説明安定性の監査
 ・複数LLM間の共通知識サーバー
 ・Embeddingモデル複数対応
 ・SNNイベントストリーム
@@ -3253,7 +3255,17 @@ RISAの記憶単位は`Memory = Structure + Delta + Transformation`とする。�
 
 自己組織化Unitは学習・活性の内部表現、Structure・Delta・Transformationは監査・交換の明示表現とする。どちらか一方だけを正解とせず、元経験と出典から再評価可能にする。
 
+RISAの追加研究テーマとしてStructural FactorizationとCompositional Reasoningを扱う。未知問題を、変数、関係、役割、時間、precondition、postcondition、不変条件を持つ再利用可能なStructural Factorへ複数候補として分解し、FactorとTransformationを制約付きで再合成して未保存の状態遷移またはrelation候補を生成する。
+
+「構造素因数」は確立した専門用語や絶対的な最小単位とはみなさない。あるタスク、粒度、engine、計算予算において、再利用、再構成、held-out予測、別領域転移、記述長、探索費用を改善するPrimitive候補として操作的に定義する。同じStructureの複数分解を許可し、構造数や頻度だけでは採用しない。
+
+合成推論は全Factorの総当たりにしない。型、文脈、時間、content address、Embedding、活性状態からtop-kを取得し、preconditionと不変条件を満たす経路だけをbeam searchまたは制約探索する。SNNの共鳴は選択的候補取得の比較方式であり、単純なindex・ANN・symbolic searchより有効かを段階的scale試験で確認する。
+
+成功条件は、登録時に存在しないFactorの組合せを要求するheld-out問題で、保存済み回答の検索、通常のgraph traversal、RAG、LLMなどのbaselineを超え、導出経路、binding、制約、出典を再現できることである。toy experimentで有効性を確認する前にFactorization関連のDB Schemaを固定しない。
+
 構造候補は、予測誤差、共鳴、競合、恒常性、Replay耐性によって動的支持を更新できるようにする。ただし、安定性は真実ではない。頻出する誤りや交絡も安定し得るため、動的支持、独立証拠、外部検証を別状態として保存し、高リスク領域では人間・ルール・外部資料による確認を必要とする。
+
+StabilityやValueの補助scoreには、単調性、convexity、特徴影響上限を構築時に保証できるモデルを比較する。Spectral Neuronはその候補の一つとするが、RISAの基本記憶単位、汎用Verifier、生物学的ニューロンとはみなさない。使用時はeigengap、eigenspace projector、spectral normなどの基底不変量を監査し、密な固有値計算の費用と単純baselineとの差を測定する。
 
 ただし、生成結果は確定事実ではなく候補である。導出経路、証拠、反例、文脈、生成エンジンとバージョン、検証状態をKnowledge Serverへ保存し、承認後のみrelationへ昇格する。
 

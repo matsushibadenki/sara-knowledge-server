@@ -19,6 +19,8 @@ RISA
 
 構造の具体表現、型付きDelta、Transformation Pattern、MDL評価については`structure-delta-transformation-memory.md`を参照する。
 
+未知問題を再利用可能な因子へ分解し、制約付きで再合成する研究は`structural-factorization-and-compositional-reasoning.md`を参照する。構造数だけで知識創発を主張せず、未経験の因子組合せを必要とするheld-out問題で評価する。
+
 構造形成の入口は、完成したパターン同士の明示的な同型判定だけに限定しない。局所表現を複数経験が再利用し、その重なりから名前のない構造が自己組織化する経路も併用する。詳細は`self-organizing-shared-representations.md`を参照する。
 
 ## 問題設定
@@ -254,9 +256,10 @@ Knowledge Server自体へ特定の推論アルゴリズムを固定しない。�
 
 ## 実装段階
 
-- [Next] 現行のSource・Record基盤を完成させ、出典追跡を先に保証する
+- [Done] Source APIとRecordの出典追跡基盤
 - [Later] toy graphでstructural patternとinstanceの最小表現を検証する
 - [Later] held-out relationを用いた構造類推ベンチマークを作る
+- [Later] held-out compositionを用いた構造分解・合成ベンチマークを作る
 - [Later] pattern・instance・inference proposalのMemory Schemaを実装する
 - [Later] top-k局所波及とフィードバック候補を接続する
 - [Later] LLM、RAG、graph traversal、RISA構造共有を比較評価する

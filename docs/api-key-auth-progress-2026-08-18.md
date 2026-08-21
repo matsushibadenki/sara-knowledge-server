@@ -29,5 +29,6 @@ Docker上のPostgreSQLを使用した統合テストで以下を確認した。
 
 - [Done] ユーザーロールに基づく操作認可
 - [Done] ログイン試行回数制限
-- [Next] Source APIと出典登録フロー
+- [Done] Source APIと出典登録フロー（2026-08-21完了）
+- [Next] Source・Record変更の監査ログ
 - [Later] APIキーのローテーション支援と監査ログ

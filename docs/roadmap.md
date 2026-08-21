@@ -26,10 +26,12 @@
 - [Done] APIキーの発行・一覧・失効・scope保存
 - [Done] APIキーによるリクエスト認証とscope認可
 - [Done] ロール認可とログイン試行回数制限
-- [Next] Source APIとRecordの出典登録フロー
+- [Done] Source API、論理削除・復元、検索、scope認可
+- [Done] Recordの出典関連付け、参照先検証、削除後のprovenance保持
 - [Done] Record CRUD、版履歴、論理削除、復元
 - [Done] Record現在版の外部キー・版番号一意制約・同時更新制御
 - [Done] Record / Version / Refresh Token / APIキーの初期インデックス
+- [Done] Source種別のDB制約とSource検索用インデックス
 - [Done] APIのDB / Redis / MinIO readiness実接続確認
 - [Done] 許可Origin方式のCORS
 - [Done] 管理画面skeletonの日本語・英語・简体中文表示
@@ -37,6 +39,7 @@
 
 ## 将来の実装
 
+- [Next] Source・Record変更の監査ログ
 - [Later] アノテーション、タグ、評価
 - [Later] JSONL / JSON / CSVインポート・エクスポート
 - [Later] データセット生成と品質管理
@@ -50,11 +53,19 @@
 - [Later] 類似DeltaからTransformation Patternを抽出
 - [Later] MDLによる基底構造・差分・例外の表現比較
 - [Later] 構造共有による未知relation候補生成とheld-out評価
+- [Later] Structural Factorization用toy domainとheld-out composition benchmark
+- [Later] 人間定義Primitiveと学習Factorによる分解・再構成baseline比較
+- [Later] top-k分解候補と制約付きFactor／Transformation合成探索
+- [Later] 構造合成推論と検索・RAG・graph traversal・LLMの比較
+- [Later] 10³→10⁵→10⁷ Factor候補の段階的scale試験
+- [Later] Factorization・Composition Proposal・Reasoning TraceのMemory Schema
 - [Later] 局所Unit再利用・residual・Assembly形成の自己組織化プロトタイプ
 - [Later] 名前のないlatent Unitの安定性・予測利得・交絡耐性評価
 - [Later] 自己組織化共有表現から監査用Structure／Deltaへの投影
 - [Later] 予測誤差・競合・恒常性による構造Stability Profile
 - [Later] Event Memoryからのsandbox Replayと段階的consolidation
 - [Later] 力学的検証とLLM Verifierの精度・費用比較
+- [Later] Spectral NeuronをStability／Value scorerとして単純baselineと比較
+- [Later] eigengap・基底不変量によるlatent表現の説明安定性評価
 - [Later] top-k局所波及、減衰、導出履歴、回帰時取消
 - [Later] バックアップ、復元、監査、負荷試験、本番化

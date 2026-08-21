@@ -43,6 +43,7 @@ JWTユーザーの場合、閲覧は`admin / editor / reviewer / viewer`、変�
   "record_type": "instruction",
   "title": "サンプル",
   "language_code": "ja",
+  "source_id": "00000000-0000-0000-0000-000000000000",
   "content": {
     "instruction": "質問",
     "output": "回答"
@@ -51,6 +52,10 @@ JWTユーザーの場合、閲覧は`admin / editor / reviewer / viewer`、変�
   "metadata": {}
 }
 ```
+
+`source_id`は任意だが、指定する場合は存在し、論理削除されていないSourceでなければならない。利用できない場合は`404 SOURCE_NOT_FOUND`を返し、Recordを作成しない。作成・更新・詳細レスポンスには、`source_id`に加えてSource情報を`source`として返す。
+
+Sourceの作成と削除方針は[`sources.md`](sources.md)を参照する。
 
 ## 更新
 

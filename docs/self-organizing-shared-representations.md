@@ -38,6 +38,8 @@ Experience / Structure / Delta / Transformation
 
 UnitやAssemblyの維持判断には、頻度だけでなく、再生時の予測誤差、競合、恒常性制約、Replay後の安定性を利用する。力学的安定性の設計は`dynamical-structural-validation.md`を参照する。
 
+反復利用されるUnitまたはAssemblyはStructural Factorの候補になり得るが、両者を同一視しない。Factorとして採用するには、分解後の再構成、held-out composition、別領域転移、探索費用を評価する。構造因数分解の設計は`structural-factorization-and-compositional-reasoning.md`を参照する。
+
 暗黙共有を唯一の正本にはしない。元のRecord、Event、Asset、出典、不変snapshotを失わない。
 
 ## 基本表現
@@ -65,6 +67,8 @@ Unitは、人間語彙で命名されたrelationに限定しない。
 - 他Unitの組合せ
 
 Unitには安定した内部IDを与え、言語ラベルは任意の後付け属性とする。`latent-3817`が有用なら、人間が意味を説明できない状態でも候補として保持できる。
+
+内部行列表現やeigenspaceを利用する場合、座標軸へ直接意味を付けない。同じ機能を持つ表現が基底変換で異なる見た目になり得るため、eigenvalue、projector、principal angleなどの基底不変量で比較する。Spectral Neuronから取り入れる範囲は`spectral-neuron-assessment.md`に定める。
 
 ## 自己組織化の処理仮説
 
@@ -263,7 +267,8 @@ Embedding clustering
 
 ## 実装段階
 
-- [Next] Source APIで元経験と出典を先に追跡可能にする
+- [Done] Source APIとRecordの出典追跡基盤
+- [Next] 将来の元経験・共有UnitをSource／Recordへbindingする
 - [Later] 小規模なイベント列用Unit表現をインメモリで試す
 - [Later] top-k再利用、新規Unit生成、residual保持を実装する
 - [Later] 共活性から二階層Assemblyを形成するtoy experimentを行う

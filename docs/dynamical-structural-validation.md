@@ -168,6 +168,8 @@ last_evaluated_at
 
 `stability_score`は一覧や候補絞り込みに利用できるが、判断時には内訳と導出式を参照する。
 
+Stability Profileから補助scoreを学習する場合、単調性と特徴影響上限を構造的に保証できるSpectral Neuronを比較候補に含める。ただし基本表現やVerifierにはせず、eigengapが小さい場合の説明不安定性、計算費用、単純baselineとの差を評価する。詳細は`spectral-neuron-assessment.md`を参照する。
+
 ## 将来の保存候補
 
 ### `memory.structure_stability_profiles`
@@ -254,7 +256,8 @@ LLM Verifierだけ
 
 ## 実装段階
 
-- [Next] Source APIで観測・予測・反例の出典を追跡可能にする
+- [Done] Source APIとRecordの出典追跡基盤
+- [Next] 将来の観測・予測・反例をSource／Recordへbindingする
 - [Later] 小規模イベント列で予測誤差と分岐統計を実装する
 - [Later] 上限付き更新と恒常性budgetを比較する
 - [Later] Event Memoryからのsandbox replayを実装する

@@ -2,7 +2,14 @@ import { afterAll, expect, test } from 'bun:test';
 import { and, eq, inArray } from 'drizzle-orm';
 import app from '../src/app.js';
 import { closeDatabase, db } from '../src/db/client.js';
-import { apiKeys, recordVersions, records, refreshTokens, users } from '../src/db/schema/index.js';
+import {
+  apiKeys,
+  recordVersions,
+  records,
+  refreshTokens,
+  sources,
+  users,
+} from '../src/db/schema/index.js';
 import { hashSecret } from '../src/auth/secrets.js';
 import { hashPassword } from '../src/auth/passwords.js';
 import { signAccessToken } from '../src/auth/tokens.js';
@@ -15,6 +22,7 @@ import {
 
 const integrationTest = process.env.RUN_INTEGRATION === '1' ? test : test.skip;
 const createdRecordIds = [];
+const createdSourceIds = [];
 const issuedRefreshTokens = [];
 const createdApiKeyIds = [];
 const createdUserIds = [];
@@ -35,6 +43,9 @@ afterAll(async () => {
       await tx.delete(records).where(eq(records.id, recordId));
     });
   }
+  if (createdSourceIds.length > 0) {
+    await db.delete(sources).where(inArray(sources.id, createdSourceIds));
+  }
 
   if (issuedRefreshTokens.length > 0) {
     const tokenHashes = await Promise.all(issuedRefreshTokens.map(hashSecret));
@@ -51,7 +62,7 @@ afterAll(async () => {
   await closeDatabase();
 });
 
-integrationTest('validates API keys, record concurrency, and refresh rotation', async () => {
+integrationTest('validates API keys, sources, record concurrency, and refresh rotation', async () => {
   const login = await request('/api/v1/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -105,6 +116,8 @@ integrationTest('validates API keys, record concurrency, and refresh rotation', 
   };
   const viewerRead = await request('/api/v1/records', { headers: viewerHeaders });
   expect(viewerRead.response.status).toBe(200);
+  const viewerSourceRead = await request('/api/v1/sources', { headers: viewerHeaders });
+  expect(viewerSourceRead.response.status).toBe(200);
   const viewerWrite = await request('/api/v1/records', {
     method: 'POST',
     headers: viewerHeaders,
@@ -112,6 +125,13 @@ integrationTest('validates API keys, record concurrency, and refresh rotation', 
   });
   expect(viewerWrite.response.status).toBe(403);
   expect(viewerWrite.body.error.code).toBe('INSUFFICIENT_ROLE');
+  const viewerSourceWrite = await request('/api/v1/sources', {
+    method: 'POST',
+    headers: viewerHeaders,
+    body: JSON.stringify({ source_type: 'manual', title: 'denied by role' }),
+  });
+  expect(viewerSourceWrite.response.status).toBe(403);
+  expect(viewerSourceWrite.body.error.code).toBe('INSUFFICIENT_ROLE');
   const viewerKeyManagement = await request('/api/v1/auth/api-keys', { headers: viewerHeaders });
   expect(viewerKeyManagement.response.status).toBe(403);
 
@@ -163,6 +183,9 @@ integrationTest('validates API keys, record concurrency, and refresh rotation', 
   });
   expect(apiKeyWrite.response.status).toBe(403);
   expect(apiKeyWrite.body.error.code).toBe('INSUFFICIENT_SCOPE');
+  const apiKeySourceRead = await request('/api/v1/sources', { headers: apiKeyHeaders });
+  expect(apiKeySourceRead.response.status).toBe(403);
+  expect(apiKeySourceRead.body.error.code).toBe('INSUFFICIENT_SCOPE');
 
   const apiKeyManagement = await request('/api/v1/auth/api-keys', { headers: apiKeyHeaders });
   expect(apiKeyManagement.response.status).toBe(401);
@@ -186,6 +209,41 @@ integrationTest('validates API keys, record concurrency, and refresh rotation', 
   const invalidId = await request('/api/v1/records/not-a-uuid', { headers });
   expect(invalidId.response.status).toBe(400);
 
+  const sourceCreated = await request('/api/v1/sources', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      source_type: 'website',
+      title: 'Integration provenance source',
+      url: 'https://example.com/integration-source',
+      author: 'SARA integration test',
+      retrieved_at: new Date().toISOString(),
+      license_type: 'test-only',
+      copyright_status: 'test-fixture',
+      content_hash: `sha256:${crypto.randomUUID()}`,
+      metadata: { test: true },
+    }),
+  });
+  expect(sourceCreated.response.status).toBe(201);
+  const sourceId = sourceCreated.body.data.id;
+  createdSourceIds.push(sourceId);
+
+  const sourceSearch = await request('/api/v1/sources?q=Integration%20provenance', { headers });
+  expect(sourceSearch.response.status).toBe(200);
+  expect(sourceSearch.body.data.some((source) => source.id === sourceId)).toBe(true);
+
+  const missingSourceRecord = await request('/api/v1/records', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      record_type: 'plain_text',
+      source_id: crypto.randomUUID(),
+      content: { text: 'must not be stored' },
+    }),
+  });
+  expect(missingSourceRecord.response.status).toBe(404);
+  expect(missingSourceRecord.body.error.code).toBe('SOURCE_NOT_FOUND');
+
   const created = await request('/api/v1/records', {
     method: 'POST',
     headers,
@@ -193,12 +251,18 @@ integrationTest('validates API keys, record concurrency, and refresh rotation', 
       record_type: 'instruction',
       title: 'Integration concurrency check',
       language_code: 'en',
+      source_id: sourceId,
       content: { instruction: 'ping', output: 'pong' },
     }),
   });
   expect(created.response.status).toBe(201);
   const recordId = created.body.data.id;
   createdRecordIds.push(recordId);
+  expect(created.body.data.source.id).toBe(sourceId);
+
+  const sourceUsage = await request(`/api/v1/sources/${sourceId}`, { headers });
+  expect(sourceUsage.response.status).toBe(200);
+  expect(sourceUsage.body.meta.active_record_count).toBe(1);
 
   const updates = await Promise.all([
     request(`/api/v1/records/${recordId}`, {
@@ -217,6 +281,45 @@ integrationTest('validates API keys, record concurrency, and refresh rotation', 
   const versions = await request(`/api/v1/records/${recordId}/versions`, { headers });
   expect(versions.body.data.map((version) => version.version_number)).toEqual([2, 1]);
   expect(versions.body.data.filter((version) => version.is_current)).toHaveLength(1);
+
+  const sourceDeleted = await request(`/api/v1/sources/${sourceId}`, {
+    method: 'DELETE',
+    headers,
+  });
+  expect(sourceDeleted.response.status).toBe(200);
+
+  const recordWithDeletedSource = await request(`/api/v1/records/${recordId}`, { headers });
+  expect(recordWithDeletedSource.response.status).toBe(200);
+  expect(recordWithDeletedSource.body.data.source.id).toBe(sourceId);
+  expect(recordWithDeletedSource.body.data.source.deleted_at).not.toBeNull();
+
+  const updatedWithDeletedSource = await request(`/api/v1/records/${recordId}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ expected_version: 2, title: 'Provenance remains available' }),
+  });
+  expect(updatedWithDeletedSource.response.status).toBe(200);
+  expect(updatedWithDeletedSource.body.data.source.id).toBe(sourceId);
+  expect(updatedWithDeletedSource.body.data.source.deleted_at).not.toBeNull();
+
+  const deletedSourceLink = await request('/api/v1/records', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      record_type: 'plain_text',
+      source_id: sourceId,
+      content: { text: 'deleted source must be rejected' },
+    }),
+  });
+  expect(deletedSourceLink.response.status).toBe(404);
+  expect(deletedSourceLink.body.error.code).toBe('SOURCE_NOT_FOUND');
+
+  const sourceRestored = await request(`/api/v1/sources/${sourceId}/restore`, {
+    method: 'POST',
+    headers,
+  });
+  expect(sourceRestored.response.status).toBe(200);
+  expect(sourceRestored.body.data.deleted_at).toBeNull();
 
   const refreshBody = JSON.stringify({ refresh_token: login.body.data.refresh_token });
   const rotations = await Promise.all([
@@ -247,4 +350,4 @@ integrationTest('validates API keys, record concurrency, and refresh rotation', 
   expect(revoked.response.status).toBe(200);
   const revokedUse = await request('/api/v1/records', { headers: apiKeyHeaders });
   expect(revokedUse.response.status).toBe(401);
-});
+}, 15_000);

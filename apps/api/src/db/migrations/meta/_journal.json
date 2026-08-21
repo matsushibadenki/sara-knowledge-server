@@ -36,6 +36,13 @@
       "when": 1787002506216,
       "tag": "0004_acoustic_senator_kelly",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787301129525,
+      "tag": "0005_elite_boom_boom",
+      "breakpoints": true
     }
   ]
 }

@@ -176,6 +176,8 @@ Transformation Patternは、単なるDeltaクラスタではなく次を持つ�
 
 変換同士にも`similar`、`causes`、`often_followed_by`、`composes_with`などの関係を作れるようにする。
 
+Transformationの合成を未知問題の解決へ利用する場合、単に接続可能なDelta列を探すだけでは不十分である。問題Structureを再利用可能なFactorへ分解し、precondition、時間、文脈、不変条件を満たす合成経路を探索する。詳細は`structural-factorization-and-compositional-reasoning.md`を参照する。
+
 ## 推奨する将来データモデル
 
 ### `memory.structures`
@@ -325,6 +327,7 @@ StructureとTransformationの候補は、明示的なgraph matchingに加えて�
 - 例外・反例保持率
 - 基底構造選択精度
 - Transformation Patternの再利用率
+- held-out compositionでのFactor分解・合成成功率
 - 変換適用によるheld-out予測精度
 - graph matchingと統合に必要な計算量
 - 導出・変更履歴の再現率
@@ -341,7 +344,8 @@ StructureとTransformationの候補は、明示的なgraph matchingに加えて�
 
 ## 実装段階
 
-- [Next] Source APIで全Structure・Delta候補の出典を追跡可能にする
+- [Done] Source APIとRecordの出典追跡基盤
+- [Next] 将来のStructure・Delta候補をSource／Recordへbindingする
 - [Later] JSON SchemaでStructureとDelta operationの最小型を定義する
 - [Later] THROWなどのtoy domainでcanonicalizationとdiffを検証する
 - [Later] snapshot＋Deltaの決定的再構成テストを作る

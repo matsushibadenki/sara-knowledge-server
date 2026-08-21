@@ -6,7 +6,7 @@ AIの知識・経験・学習データをモデルの重みから切り離し、
 >
 > **简体中文：** 一个以 PostgreSQL 为权威数据源的 AI 知识与记忆服务器，用于保存可验证的数据、来源、版本历史和可复用结构，并独立于任何单一模型。
 
-現在はPhase 1の基盤実装中です。認証とRecord APIは動作しますが、Memory Schema、RISAの自己組織化、WordPress同期、完全な管理画面はまだ実装されていません。
+現在はPhase 1の基盤実装中です。認証、Record API、Source APIと出典関連付けは動作しますが、Memory Schema、RISAの自己組織化、WordPress同期、完全な管理画面はまだ実装されていません。
 
 ## 成功の定義
 
@@ -71,6 +71,12 @@ Experience → Structure → Delta → Transformation
 複数経験が同じ局所Unitを再利用した結果として、名前のない概念候補が形成されることを研究します。一方で、暗黙表現だけを正本にはせず、元経験、出典、Structure、型付きDelta、反例へ戻れる設計を維持します。
 
 名前のないUnitは、頻出という理由だけで知識とみなしません。held-out予測、転移、圧縮、検索などへの再現可能な寄与と、交絡への耐性を評価します。
+
+### 問題を構造因子へ分解し、制約付きで再合成する
+
+RISAの将来研究では、未知問題を再利用可能な関係・役割・状態変換へ分解し、FactorとTransformationを新しい組合せで合成する推論を評価します。「構造断片を大量保存すれば解ける」とは仮定せず、分解精度、held-out composition、文脈制約、探索費用、導出の再現性を測定します。
+
+構造の「素因数」は絶対的な最小単位ではなく、あるタスクと計算予算で再構成・予測・転移へ寄与するPrimitive候補として扱います。複数の分解候補を許し、元経験、出典、反例へ戻れることを維持します。
 
 ### 構造は正誤だけでなく安定性も検証する
 
@@ -150,7 +156,8 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Done] PostgreSQL、Redis、MinIOのreadiness確認
 - [Done] 許可Origin方式のCORS
 - [Done] 管理画面skeletonの日本語・英語・简体中文表示
-- [Next] Source APIとRecordの出典登録フロー
+- [Done] Source APIとRecordの出典登録フロー
+- [Next] Source・Record変更の監査ログ
 
 ### 将来設計
 
@@ -251,18 +258,26 @@ PATCH  /records/:id
 DELETE /records/:id
 POST   /records/:id/restore
 GET    /records/:id/versions
+
+GET    /sources
+POST   /sources
+GET    /sources/:id
+PATCH  /sources/:id
+DELETE /sources/:id
+POST   /sources/:id/restore
 ```
 
-JWTアクセストークンまたは`sara_`プレフィックスのAPIキーをBearer Tokenとして送信します。Record更新では競合検出のため`expected_version`が必要です。
+JWTアクセストークンまたは`sara_`プレフィックスのAPIキーをBearer Tokenとして送信します。Record更新では競合検出のため`expected_version`が必要です。Recordへ出典を関連付ける場合は、先にSourceを作成して`source_id`を指定します。
 
 ```text
 Authorization: Bearer <JWT or sara_API_KEY>
 ```
 
-認証とRecord形式の詳細:
+認証、Record、Source形式の詳細:
 
 - [`docs/authentication.md`](docs/authentication.md)
 - [`docs/records.md`](docs/records.md)
+- [`docs/sources.md`](docs/sources.md)
 
 ## テスト
 
@@ -324,6 +339,7 @@ packages/      将来の共有パッケージ
 - [Structure・Delta・Transformation記憶モデル](docs/structure-delta-transformation-memory.md)
 - [自己組織化する共有表現](docs/self-organizing-shared-representations.md)
 - [力学的な構造検証](docs/dynamical-structural-validation.md)
+- [構造因数分解と構造合成推論](docs/structural-factorization-and-compositional-reasoning.md)
 
 重要な設計判断は、会話内だけに残さず`docs/`へ保存します。実装と将来設計に差がある場合は、ドキュメント内で`[Done]`、`[Next]`、`[Later]`または「将来候補」として区別します。
 

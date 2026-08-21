@@ -93,7 +93,17 @@ export const sources = datasetSchema.table('sources', {
   metadata: jsonb('metadata').notNull().default({}),
   createdBy: uuid('created_by').references(() => users.id),
   ...auditColumns,
-});
+}, (table) => ({
+  activeUpdatedIndex: index('sources_active_updated_idx').on(table.updatedAt)
+    .where(sql`${table.deletedAt} IS NULL`),
+  sourceTypeIndex: index('sources_source_type_idx').on(table.sourceType),
+  urlIndex: index('sources_url_idx').on(table.url),
+  contentHashIndex: index('sources_content_hash_idx').on(table.contentHash),
+  sourceTypeCheck: check(
+    'sources_source_type_check',
+    sql`${table.sourceType} IN ('manual', 'website', 'document', 'book', 'dataset', 'conversation', 'sensor', 'generated', 'imported', 'wordpress')`,
+  ),
+}));
 
 export const records = datasetSchema.table('records', {
   id: uuid('id').defaultRandom().primaryKey(),

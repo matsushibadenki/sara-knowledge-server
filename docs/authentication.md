@@ -66,11 +66,13 @@ Authorization: Bearer sara_<API_KEY>
 
 JWTとAPIキーは`sara_`プレフィックスで区別する。APIキーはRecordなどの機械アクセスに利用できるが、`/auth/me`とAPIキー管理APIはJWTアクセストークン専用とする。
 
-Record APIで現在利用するscope:
+Record APIとSource APIで現在利用するscope:
 
 ```text
 records:read   GETによる一覧・詳細・Version参照
 records:write  POST・PATCH・DELETE・復元
+sources:read   Sourceの一覧・詳細参照
+sources:write  Sourceの作成・更新・論理削除・復元
 ```
 
 scopeが不足する場合は`403 INSUFFICIENT_SCOPE`、無効・期限切れ・失効済みの場合は`401 INVALID_TOKEN`を返す。scopeを持たないAPIキーは、scope保護されたAPIへアクセスできない。
@@ -93,10 +95,10 @@ JWT利用者はDB上の最新roleで認可する。Token内の古いroleだけ�
 
 ```text
 admin      すべての現在実装済み操作
-editor     Recordの閲覧・作成・更新・論理削除・復元
-reviewer   Recordの閲覧
-viewer     Recordの閲覧
-service    JWTによるRecord操作は不可。APIキーscopeを利用
+editor     RecordとSourceの閲覧・作成・更新・論理削除・復元
+reviewer   RecordとSourceの閲覧
+viewer     RecordとSourceの閲覧
+service    JWTによるRecord・Source操作は不可。APIキーscopeを利用
 ```
 
 APIキーの発行・一覧・失効は現在`admin`専用とする。role不足は`403 INSUFFICIENT_ROLE`を返す。DBにも`admin / editor / reviewer / viewer / service`のCHECK制約を設定する。

@@ -3,8 +3,9 @@ import { Hono } from 'hono';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/client.js';
-import { recordVersions, records } from '../db/schema/index.js';
+import { recordVersions, records, sources } from '../db/schema/index.js';
 import { requireAuth, requireRoles, requireScopes } from '../auth/middleware.js';
+import { serializeSource } from './sources.js';
 
 const recordTypes = [
   'plain_text', 'instruction', 'qa', 'chat', 'sharegpt', 'chatml',
@@ -49,7 +50,7 @@ function errorResponse(c, status, code, message, details = []) {
   return c.json({ data: null, meta: {}, error: { code, message, details } }, status);
 }
 
-function serializeRecord(record, version = null) {
+function serializeRecord(record, version = null, source = undefined) {
   return {
     id: record.id,
     record_type: record.recordType,
@@ -67,6 +68,7 @@ function serializeRecord(record, version = null) {
     created_at: record.createdAt,
     updated_at: record.updatedAt,
     deleted_at: record.deletedAt,
+    ...(source !== undefined ? { source: serializeSource(source) } : {}),
     ...(version ? {
       current_version: {
         id: version.id,
@@ -102,6 +104,26 @@ async function findRecord(id, includeDeleted = false) {
   if (!includeDeleted) conditions.push(isNull(records.deletedAt));
   const [record] = await db.select().from(records).where(and(...conditions)).limit(1);
   return record;
+}
+
+async function findSource(sourceId, executor = db, lock = false) {
+  if (!sourceId) return null;
+  let query = executor.select()
+    .from(sources)
+    .where(and(eq(sources.id, sourceId), isNull(sources.deletedAt)))
+    .limit(1);
+  if (lock) query = query.for('key share');
+  const [source] = await query;
+  return source;
+}
+
+async function findSourceForProvenance(sourceId, executor = db) {
+  if (!sourceId) return null;
+  const [source] = await executor.select()
+    .from(sources)
+    .where(eq(sources.id, sourceId))
+    .limit(1);
+  return source;
 }
 
 const recordsRoutes = new Hono();
@@ -160,6 +182,9 @@ recordsRoutes.post('/', requireScopes('records:write'), requireRoles('admin', 'e
   const input = result.data;
 
   const created = await db.transaction(async (tx) => {
+    const source = await findSource(input.source_id, tx, true);
+    if (input.source_id && !source) return { error: 'source_not_found' };
+
     const [record] = await tx.insert(records).values({
       id: recordId,
       recordType: input.record_type,
@@ -195,10 +220,14 @@ recordsRoutes.post('/', requireScopes('records:write'), requireRoles('admin', 'e
       .where(eq(records.id, recordId))
       .returning();
 
-    return { record: currentRecord || record, version };
+    return { record: currentRecord || record, version, source };
   });
 
-  return c.json({ data: serializeRecord(created.record, created.version), meta: {}, error: null }, 201);
+  if (created.error === 'source_not_found') {
+    return errorResponse(c, 404, 'SOURCE_NOT_FOUND', 'The selected source was not found or is deleted.');
+  }
+
+  return c.json({ data: serializeRecord(created.record, created.version, created.source), meta: {}, error: null }, 201);
 });
 
 recordsRoutes.get('/:id', requireScopes('records:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
@@ -211,8 +240,11 @@ recordsRoutes.get('/:id', requireScopes('records:read'), requireRoles('admin', '
     .from(recordVersions)
     .where(eq(recordVersions.id, record.currentVersionId))
     .limit(1);
+  const [source] = record.sourceId
+    ? await db.select().from(sources).where(eq(sources.id, record.sourceId)).limit(1)
+    : [null];
 
-  return c.json({ data: serializeRecord(record, version), meta: {}, error: null });
+  return c.json({ data: serializeRecord(record, version, source), meta: {}, error: null });
 });
 
 recordsRoutes.get('/:id/versions', requireScopes('records:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
@@ -258,6 +290,11 @@ recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin'
       return { error: 'conflict', currentVersion: currentVersion?.versionNumber || null };
     }
 
+    const source = input.source_id === undefined
+      ? await findSourceForProvenance(record.sourceId, tx)
+      : await findSource(input.source_id, tx, true);
+    if (input.source_id && !source) return { error: 'source_not_found' };
+
     await tx.update(recordVersions)
       .set({ isCurrent: false, updatedAt: now })
       .where(eq(recordVersions.id, currentVersion.id));
@@ -292,7 +329,7 @@ recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin'
       .where(eq(records.id, record.id))
       .returning();
 
-    return { record: nextRecord, version };
+    return { record: nextRecord, version, source };
   });
 
   if (updated.error === 'not_found') {
@@ -304,8 +341,11 @@ recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin'
       current_version: updated.currentVersion,
     });
   }
+  if (updated.error === 'source_not_found') {
+    return errorResponse(c, 404, 'SOURCE_NOT_FOUND', 'The selected source was not found or is deleted.');
+  }
 
-  return c.json({ data: serializeRecord(updated.record, updated.version), meta: {}, error: null });
+  return c.json({ data: serializeRecord(updated.record, updated.version, updated.source), meta: {}, error: null });
 });
 
 recordsRoutes.delete('/:id', requireScopes('records:write'), requireRoles('admin', 'editor'), async (c) => {

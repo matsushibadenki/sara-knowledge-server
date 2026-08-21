@@ -27,6 +27,8 @@ export const apiKeyScopes = [
   'records:read',
   'records:write',
   'records:approve',
+  'sources:read',
+  'sources:write',
   'datasets:read',
   'datasets:write',
   'memory:read',

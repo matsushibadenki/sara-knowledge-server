@@ -40,5 +40,6 @@
 
 - [Next] APIキーによるリクエスト認証とscope認可
 - [Next] ロール認可、ログイン試行制限、監査ログ
-- [Next] Source APIとRecordの出典登録フロー
+- [Done] Source APIとRecordの出典登録フロー（2026-08-21完了）
+- [Next] Source・Record変更の監査ログ
 - [Later] インポート、エクスポート、解析Worker、Knowledge構造化
