@@ -1,0 +1,21 @@
+# Import／Export実装記録（2026-08-31）
+
+- [Done] JSON、JSONL、CSV parserとcanonical Record変換
+- [Done] Instruction形式の自動判別
+- [Done] 5 MiB・1,000行・1,000件の同期処理上限
+- [Done] 原文、SHA-256、byte数、Source provenance
+- [Done] 作成者単位の冪等キーと異内容409
+- [Done] 行単位トランザクション、部分成功、行別エラー
+- [Done] JSON、JSONL、CSV Exportとmetadata・checksum header
+- [Done] Import生成Source／Recordの既存監査ログ連携
+- [Done] DB CHECK、部分索引、複合一意索引、外部キー索引
+- [Done] Docker上の全10テスト・177 assertions成功、失敗0件
+- [Done] auth／datasetスキーマの外部キー索引漏れ0件
+- [Done] PostgreSQL、Redis、MinIO readiness正常
+- [Done] MinIO原本保管とWorkerによる大容量非同期処理
+- [Done] Redis通知とPostgreSQLを正本とするqueue
+- [Done] SKIP LOCKEDによる非待機claim
+- [Done] chunk進捗、取消要求、stale processing再queue
+- [Done] Import Itemからの再開位置・件数復元
+- [Done] 非同期Export成果物downloadとchecksum
+- [Next] Dataset Definition・Snapshot・manifest生成

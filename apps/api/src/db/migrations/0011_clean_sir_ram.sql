@@ -1,0 +1,1 @@
+ALTER TABLE "dataset"."import_jobs" ADD CONSTRAINT "import_jobs_completed_counts_check" CHECK ("dataset"."import_jobs"."status" = 'running' OR "dataset"."import_jobs"."total_count" = "dataset"."import_jobs"."succeeded_count" + "dataset"."import_jobs"."failed_count");

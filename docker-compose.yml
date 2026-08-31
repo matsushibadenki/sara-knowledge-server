@@ -56,6 +56,7 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-sara_minio}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change_me}
       MINIO_BUCKET: ${MINIO_BUCKET:-sara-assets}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
 
   mailpit:
     image: axllent/mailpit:latest
@@ -122,11 +123,21 @@ services:
       APP_ENV: ${APP_ENV:-development}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       DATABASE_URL: ${DATABASE_URL:-postgresql://sara:change_me@postgres:5432/sara_knowledge}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio}
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-sara_minio}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change_me}
+      MINIO_BUCKET: ${MINIO_BUCKET:-sara-assets}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      WORKER_CHUNK_SIZE: ${WORKER_CHUNK_SIZE:-50}
+      ASYNC_IMPORT_MAX_ROWS: ${ASYNC_IMPORT_MAX_ROWS:-100000}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:

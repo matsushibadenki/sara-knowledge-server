@@ -32,6 +32,10 @@ URLとcontent hashは重複候補の検索に使うが、取得日時や版の�
 
 ## 次の優先事項
 
-- [Next] Source・Recordの作成、更新、論理削除、復元を記録する監査ログ
+- [Done] Source・Recordの作成、更新、論理削除、復元を記録する監査ログ（2026-08-31完了）
+- [Done] アノテーション・タグ・評価の最小スキーマとレビュー入口
+- [Done] JSONL／JSON／CSV同期Import・Export
+- [Done] MinIOとWorkerによる大容量非同期処理
+- [Next] Dataset Definition・Snapshot・manifest生成
 - [Later] 重複Source候補の検出と統合支援
 - [Later] WordPress・Importジョブからの冪等なSource登録

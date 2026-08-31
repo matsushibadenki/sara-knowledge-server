@@ -26,6 +26,12 @@
 - `authentication.md`: 認証方式と開発用seed
 - `records.md`: Record CRUDとバージョン管理
 - `sources.md`: Source CRUD、出典追跡、Recordとの関連付け
+- `audit-logs.md`: Source・Record変更の監査、閲覧制御、データ最小化
+- `quality-and-review.md`: Tag・Annotation・Evaluation・Version固定レビューの仕様
+- `quality-review-progress-2026-08-31.md`: 品質管理・レビュー節目の実装・検証記録
+- `import-export.md`: JSON／JSONL／CSV取り込み・出力、冪等性、上限
+- `import-export-progress-2026-08-31.md`: Import／Export節目の実装・検証記録
+- `async-worker-progress-2026-08-31.md`: MinIO・Redis・Worker非同期処理の実装記録
 - `late-labeling-and-emergent-concepts.md`: 遅延ラベリングと創発的概念形成の研究仮説
 - `feedback-driven-structural-updates.md`: フィードバック駆動の構造更新方針
 - `structural-knowledge-emergence.md`: 構造共有・再利用・未知関係候補生成の研究設計

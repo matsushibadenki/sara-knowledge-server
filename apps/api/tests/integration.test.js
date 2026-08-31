@@ -4,10 +4,19 @@ import app from '../src/app.js';
 import { closeDatabase, db } from '../src/db/client.js';
 import {
   apiKeys,
+  annotations,
+  auditLogs,
+  evaluations,
+  exportJobs,
+  importItems,
+  importJobs,
+  recordReviews,
+  recordTags,
   recordVersions,
   records,
   refreshTokens,
   sources,
+  tags,
   users,
 } from '../src/db/schema/index.js';
 import { hashSecret } from '../src/auth/secrets.js';
@@ -26,6 +35,10 @@ const createdSourceIds = [];
 const issuedRefreshTokens = [];
 const createdApiKeyIds = [];
 const createdUserIds = [];
+const createdTagIds = [];
+const createdImportJobIds = [];
+const createdExportJobIds = [];
+const createdObjectKeys = [];
 const rateLimitedEmails = [];
 
 async function request(path, options = {}) {
@@ -36,13 +49,41 @@ async function request(path, options = {}) {
 afterAll(async () => {
   if (process.env.RUN_INTEGRATION !== '1') return;
 
+  const auditedResourceIds = [...createdRecordIds, ...createdSourceIds];
+  if (auditedResourceIds.length > 0) {
+    await db.delete(auditLogs).where(inArray(auditLogs.resourceId, auditedResourceIds));
+  }
+
+  if (createdImportJobIds.length > 0) {
+    await db.delete(importItems).where(inArray(importItems.importJobId, createdImportJobIds));
+    await db.delete(importJobs).where(inArray(importJobs.id, createdImportJobIds));
+  }
+  if (createdExportJobIds.length > 0) {
+    await db.delete(exportJobs).where(inArray(exportJobs.id, createdExportJobIds));
+  }
+  if (createdObjectKeys.length > 0) {
+    const objectStore = new Bun.S3Client({
+      endpoint: `${process.env.MINIO_USE_SSL === 'true' ? 'https' : 'http'}://${process.env.MINIO_ENDPOINT}:${process.env.MINIO_PORT}`,
+      accessKeyId: process.env.MINIO_ACCESS_KEY,
+      secretAccessKey: process.env.MINIO_SECRET_KEY,
+      bucket: process.env.MINIO_BUCKET,
+      region: 'us-east-1',
+    });
+    for (const key of createdObjectKeys) await objectStore.delete(key).catch(() => {});
+  }
+
   for (const recordId of createdRecordIds) {
     await db.transaction(async (tx) => {
+      await tx.delete(recordTags).where(eq(recordTags.recordId, recordId));
+      await tx.delete(annotations).where(eq(annotations.recordId, recordId));
+      await tx.delete(evaluations).where(eq(evaluations.recordId, recordId));
+      await tx.delete(recordReviews).where(eq(recordReviews.recordId, recordId));
       await tx.update(records).set({ currentVersionId: null }).where(eq(records.id, recordId));
       await tx.delete(recordVersions).where(eq(recordVersions.recordId, recordId));
       await tx.delete(records).where(eq(records.id, recordId));
     });
   }
+  if (createdTagIds.length > 0) await db.delete(tags).where(inArray(tags.id, createdTagIds));
   if (createdSourceIds.length > 0) {
     await db.delete(sources).where(inArray(sources.id, createdSourceIds));
   }
@@ -62,7 +103,7 @@ afterAll(async () => {
   await closeDatabase();
 });
 
-integrationTest('validates API keys, sources, record concurrency, and refresh rotation', async () => {
+integrationTest('validates auth, provenance, review, audit, import/export, concurrency, and refresh rotation', async () => {
   const login = await request('/api/v1/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -118,6 +159,11 @@ integrationTest('validates API keys, sources, record concurrency, and refresh ro
   expect(viewerRead.response.status).toBe(200);
   const viewerSourceRead = await request('/api/v1/sources', { headers: viewerHeaders });
   expect(viewerSourceRead.response.status).toBe(200);
+  const viewerAuditRead = await request('/api/v1/audit-logs', { headers: viewerHeaders });
+  expect(viewerAuditRead.response.status).toBe(403);
+  expect(viewerAuditRead.body.error.code).toBe('INSUFFICIENT_ROLE');
+  const viewerReviewQueue = await request('/api/v1/review-queue', { headers: viewerHeaders });
+  expect(viewerReviewQueue.response.status).toBe(403);
   const viewerWrite = await request('/api/v1/records', {
     method: 'POST',
     headers: viewerHeaders,
@@ -186,6 +232,33 @@ integrationTest('validates API keys, sources, record concurrency, and refresh ro
   const apiKeySourceRead = await request('/api/v1/sources', { headers: apiKeyHeaders });
   expect(apiKeySourceRead.response.status).toBe(403);
   expect(apiKeySourceRead.body.error.code).toBe('INSUFFICIENT_SCOPE');
+  const apiKeyAuditRead = await request('/api/v1/audit-logs', { headers: apiKeyHeaders });
+  expect(apiKeyAuditRead.response.status).toBe(401);
+  const apiKeyImport = await request('/api/v1/imports', {
+    method: 'POST', headers: apiKeyHeaders,
+    body: JSON.stringify({ format: 'json', content: '[]', idempotency_key: `denied-${crypto.randomUUID()}` }),
+  });
+  expect(apiKeyImport.response.status).toBe(403);
+
+  const sourceWriterKey = await request('/api/v1/auth/api-keys', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ name: 'Source writer integration key', scopes: ['sources:write'] }),
+  });
+  expect(sourceWriterKey.response.status).toBe(201);
+  createdApiKeyIds.push(sourceWriterKey.body.data.id);
+  const sourceWriterHeaders = {
+    Authorization: `Bearer ${sourceWriterKey.body.data.key}`,
+    'Content-Type': 'application/json',
+  };
+  const apiKeySourceCreated = await request('/api/v1/sources', {
+    method: 'POST',
+    headers: sourceWriterHeaders,
+    body: JSON.stringify({ source_type: 'generated', title: 'API key audit source' }),
+  });
+  expect(apiKeySourceCreated.response.status).toBe(201);
+  const apiKeySourceId = apiKeySourceCreated.body.data.id;
+  createdSourceIds.push(apiKeySourceId);
 
   const apiKeyManagement = await request('/api/v1/auth/api-keys', { headers: apiKeyHeaders });
   expect(apiKeyManagement.response.status).toBe(401);
@@ -225,12 +298,21 @@ integrationTest('validates API keys, sources, record concurrency, and refresh ro
     }),
   });
   expect(sourceCreated.response.status).toBe(201);
+  const sourceCreateRequestId = sourceCreated.response.headers.get('X-Request-ID');
+  expect(sourceCreateRequestId).toMatch(/^[0-9a-f-]{36}$/);
   const sourceId = sourceCreated.body.data.id;
   createdSourceIds.push(sourceId);
 
   const sourceSearch = await request('/api/v1/sources?q=Integration%20provenance', { headers });
   expect(sourceSearch.response.status).toBe(200);
   expect(sourceSearch.body.data.some((source) => source.id === sourceId)).toBe(true);
+
+  const sourceUpdated = await request(`/api/v1/sources/${sourceId}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ publisher: 'Updated integration publisher' }),
+  });
+  expect(sourceUpdated.response.status).toBe(200);
 
   const missingSourceRecord = await request('/api/v1/records', {
     method: 'POST',
@@ -321,6 +403,305 @@ integrationTest('validates API keys, sources, record concurrency, and refresh ro
   expect(sourceRestored.response.status).toBe(200);
   expect(sourceRestored.body.data.deleted_at).toBeNull();
 
+  const recordDeleted = await request(`/api/v1/records/${recordId}`, {
+    method: 'DELETE',
+    headers,
+  });
+  expect(recordDeleted.response.status).toBe(200);
+  const recordRestored = await request(`/api/v1/records/${recordId}/restore`, {
+    method: 'POST',
+    headers,
+  });
+  expect(recordRestored.response.status).toBe(200);
+
+  const assignedTags = await request(`/api/v1/records/${recordId}/tags`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ tags: ['Important', ' important ', '日本語'] }),
+  });
+  expect(assignedTags.response.status).toBe(201);
+  expect(assignedTags.body.data).toHaveLength(2);
+  createdTagIds.push(...assignedTags.body.data.map((tag) => tag.id));
+  const listedTags = await request(`/api/v1/records/${recordId}/tags`, { headers });
+  expect(listedTags.response.status).toBe(200);
+  expect(listedTags.body.data.map((tag) => tag.normalized_name)).toContain('important');
+
+  const annotation = await request(`/api/v1/records/${recordId}/annotations`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ annotation_type: 'correction', payload: { field: 'output', suggestion: 'PONG' } }),
+  });
+  expect(annotation.response.status).toBe(201);
+  expect(annotation.body.data.record_version_id).toBe(recordRestored.body.data.current_version_id);
+  const resolvedAnnotation = await request(
+    `/api/v1/records/${recordId}/annotations/${annotation.body.data.id}/resolve`,
+    { method: 'POST', headers },
+  );
+  expect(resolvedAnnotation.response.status).toBe(200);
+  expect(resolvedAnnotation.body.data.status).toBe('resolved');
+
+  const invalidEvaluation = await request(`/api/v1/records/${recordId}/evaluations`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ metric: 'correctness', score: 1.1, verdict: 'pass' }),
+  });
+  expect(invalidEvaluation.response.status).toBe(400);
+  const evaluation = await request(`/api/v1/records/${recordId}/evaluations`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ metric: 'correctness', score: 0.95, verdict: 'pass', notes: 'Verified fixture' }),
+  });
+  expect(evaluation.response.status).toBe(201);
+  expect(evaluation.body.data.score).toBe(0.95);
+
+  const submittedReview = await request(`/api/v1/records/${recordId}/submit-review`, {
+    method: 'POST', headers, body: JSON.stringify({ note: 'Ready for review' }),
+  });
+  expect(submittedReview.response.status).toBe(201);
+  const duplicateReview = await request(`/api/v1/records/${recordId}/submit-review`, {
+    method: 'POST', headers, body: '{}',
+  });
+  expect(duplicateReview.response.status).toBe(409);
+  const blockedUpdate = await request(`/api/v1/records/${recordId}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ expected_version: 3, title: 'Must wait for review' }),
+  });
+  expect(blockedUpdate.response.status).toBe(409);
+  expect(blockedUpdate.body.error.code).toBe('RECORD_PENDING_REVIEW');
+  const blockedDelete = await request(`/api/v1/records/${recordId}`, { method: 'DELETE', headers });
+  expect(blockedDelete.response.status).toBe(409);
+  expect(blockedDelete.body.error.code).toBe('RECORD_PENDING_REVIEW');
+  const reviewQueue = await request('/api/v1/review-queue', { headers });
+  expect(reviewQueue.response.status).toBe(200);
+  expect(reviewQueue.body.data.some((review) => review.id === submittedReview.body.data.id)).toBe(true);
+  const approvedReview = await request(
+    `/api/v1/records/${recordId}/reviews/${submittedReview.body.data.id}/decision`,
+    { method: 'POST', headers, body: JSON.stringify({ decision: 'approved', note: 'Accepted' }) },
+  );
+  expect(approvedReview.response.status).toBe(200);
+  expect(approvedReview.body.data.status).toBe('approved');
+  const reviewHistory = await request(`/api/v1/records/${recordId}/reviews`, { headers });
+  expect(reviewHistory.response.status).toBe(200);
+  expect(reviewHistory.body.data[0].reviewed_by).toBe(login.body.data.user.id);
+  const reviewAuditFilter = await request('/api/v1/audit-logs?action=submit_review&limit=20', { headers });
+  expect(reviewAuditFilter.response.status).toBe(200);
+  expect(reviewAuditFilter.body.data.some((entry) => entry.resource_id === recordId)).toBe(true);
+
+  const importLanguage = `it-${crypto.randomUUID().slice(0, 8)}`;
+  const jsonlContent = [
+    JSON.stringify({ instruction: 'Say hello', output: 'Hello', title: 'Imported instruction' }),
+    JSON.stringify({ record_type: 'unsupported_type', content: { invalid: true } }),
+    JSON.stringify({ record_type: 'plain_text', title: 'Imported plain text', text: 'Knowledge survives models.' }),
+  ].join('\n');
+  const importKey = `integration-${crypto.randomUUID()}`;
+  const importedJsonl = await request('/api/v1/imports', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      format: 'jsonl', content: jsonlContent, idempotency_key: importKey,
+      file_name: 'integration.jsonl', defaults: { language_code: importLanguage },
+    }),
+  });
+  expect(importedJsonl.response.status).toBe(201);
+  expect(importedJsonl.body.data.status).toBe('completed_with_errors');
+  expect(importedJsonl.body.data.succeeded_count).toBe(2);
+  expect(importedJsonl.body.data.failed_count).toBe(1);
+  expect(importedJsonl.body.data.raw_content).toBeUndefined();
+  createdImportJobIds.push(importedJsonl.body.data.id);
+  createdSourceIds.push(importedJsonl.body.data.source_id);
+
+  const replayedImport = await request('/api/v1/imports', {
+    method: 'POST', headers,
+    body: JSON.stringify({ format: 'jsonl', content: jsonlContent, idempotency_key: importKey }),
+  });
+  expect(replayedImport.response.status).toBe(200);
+  expect(replayedImport.body.meta.replayed).toBe(true);
+  expect(replayedImport.body.data.id).toBe(importedJsonl.body.data.id);
+  const conflictingReplay = await request('/api/v1/imports', {
+    method: 'POST', headers,
+    body: JSON.stringify({ format: 'jsonl', content: '{}', idempotency_key: importKey }),
+  });
+  expect(conflictingReplay.response.status).toBe(409);
+  expect(conflictingReplay.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+
+  const jsonlDetail = await request(`/api/v1/imports/${importedJsonl.body.data.id}`, { headers });
+  expect(jsonlDetail.response.status).toBe(200);
+  expect(jsonlDetail.body.data.items).toHaveLength(3);
+  expect(jsonlDetail.body.data.items.filter((item) => item.status === 'failed')).toHaveLength(1);
+  createdRecordIds.push(...jsonlDetail.body.data.items.map((item) => item.record_id).filter(Boolean));
+
+  const importedJson = await request('/api/v1/imports', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      format: 'json',
+      content: JSON.stringify([{ record_type: 'qa', title: 'JSON import', content: { question: 'Q', answer: 'A' } }]),
+      idempotency_key: `json-${crypto.randomUUID()}`,
+      defaults: { language_code: importLanguage },
+    }),
+  });
+  expect(importedJson.response.status).toBe(201);
+  expect(importedJson.body.data.succeeded_count).toBe(1);
+  createdImportJobIds.push(importedJson.body.data.id);
+  createdSourceIds.push(importedJson.body.data.source_id);
+  const jsonDetail = await request(`/api/v1/imports/${importedJson.body.data.id}`, { headers });
+  createdRecordIds.push(...jsonDetail.body.data.items.map((item) => item.record_id).filter(Boolean));
+
+  const importedCsv = await request('/api/v1/imports', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      format: 'csv',
+      content: `record_type,title,language_code,text\nplain_text,"CSV, title",${importLanguage},hello`,
+      idempotency_key: `csv-${crypto.randomUUID()}`,
+    }),
+  });
+  expect(importedCsv.response.status).toBe(201);
+  expect(importedCsv.body.data.succeeded_count).toBe(1);
+  createdImportJobIds.push(importedCsv.body.data.id);
+  createdSourceIds.push(importedCsv.body.data.source_id);
+  const csvDetail = await request(`/api/v1/imports/${importedCsv.body.data.id}`, { headers });
+  createdRecordIds.push(...csvDetail.body.data.items.map((item) => item.record_id).filter(Boolean));
+
+  const malformedImport = await request('/api/v1/imports', {
+    method: 'POST', headers,
+    body: JSON.stringify({ format: 'json', content: '{broken', idempotency_key: `broken-${crypto.randomUUID()}` }),
+  });
+  expect(malformedImport.response.status).toBe(422);
+  expect(malformedImport.body.data.status).toBe('failed');
+  expect(typeof malformedImport.body.meta.parse_error).toBe('string');
+  createdImportJobIds.push(malformedImport.body.data.id);
+  createdSourceIds.push(malformedImport.body.data.source_id);
+
+  for (const format of ['json', 'jsonl', 'csv']) {
+    const response = await app.request('/api/v1/exports', {
+      method: 'POST', headers,
+      body: JSON.stringify({ format, language_code: importLanguage }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Disposition')).toContain(`.${format}`);
+    expect(response.headers.get('X-Content-SHA256')).toStartWith('sha256:');
+    const exportId = response.headers.get('X-Export-ID');
+    createdExportJobIds.push(exportId);
+    const content = await response.text();
+    expect(content).toContain('Imported instruction');
+    const exportDetail = await request(`/api/v1/exports/${exportId}`, { headers });
+    expect(exportDetail.response.status).toBe(200);
+    expect(exportDetail.body.data.record_count).toBe(4);
+  }
+
+  const asyncLanguage = `async-${crypto.randomUUID().slice(0, 8)}`;
+  const asyncImport = await request('/api/v1/imports/async', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      format: 'jsonl',
+      content: [1, 2, 3].map((number) => JSON.stringify({
+        record_type: 'plain_text', title: `Async imported ${number}`, text: `async-${number}`,
+      })).join('\n'),
+      idempotency_key: `async-import-${crypto.randomUUID()}`,
+      file_name: 'async-integration.jsonl',
+      defaults: { language_code: asyncLanguage },
+    }),
+  });
+  expect(asyncImport.response.status).toBe(202);
+  expect(asyncImport.body.data.mode).toBe('async');
+  expect(asyncImport.body.data.status).toBe('queued');
+  createdImportJobIds.push(asyncImport.body.data.id);
+  createdSourceIds.push(asyncImport.body.data.source_id);
+  createdObjectKeys.push(asyncImport.body.data.object_key);
+
+  let asyncImportDetail;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    asyncImportDetail = await request(`/api/v1/imports/${asyncImport.body.data.id}`, { headers });
+    if (['completed', 'completed_with_errors', 'failed'].includes(asyncImportDetail.body.data.status)) break;
+    await Bun.sleep(100);
+  }
+  expect(asyncImportDetail.body.data.status).toBe('completed');
+  expect(asyncImportDetail.body.data.processed_count).toBe(3);
+  expect(asyncImportDetail.body.data.items).toHaveLength(3);
+  createdRecordIds.push(...asyncImportDetail.body.data.items.map((item) => item.record_id).filter(Boolean));
+
+  const asyncExport = await request('/api/v1/exports/async', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      format: 'jsonl', language_code: asyncLanguage,
+      idempotency_key: `async-export-${crypto.randomUUID()}`,
+    }),
+  });
+  expect(asyncExport.response.status).toBe(202);
+  expect(asyncExport.body.data.status).toBe('queued');
+  createdExportJobIds.push(asyncExport.body.data.id);
+  createdObjectKeys.push(asyncExport.body.data.object_key);
+
+  let asyncExportDetail;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    asyncExportDetail = await request(`/api/v1/exports/${asyncExport.body.data.id}`, { headers });
+    if (['completed', 'failed'].includes(asyncExportDetail.body.data.status)) break;
+    await Bun.sleep(100);
+  }
+  expect(asyncExportDetail.body.data.status).toBe('completed');
+  expect(asyncExportDetail.body.data.record_count).toBe(3);
+  const asyncDownload = await app.request(`/api/v1/exports/${asyncExport.body.data.id}/download`, { headers });
+  expect(asyncDownload.status).toBe(200);
+  expect(asyncDownload.headers.get('X-Content-SHA256')).toStartWith('sha256:');
+  expect(await asyncDownload.text()).toContain('Async imported 1');
+  const completedCancel = await request(`/api/v1/exports/${asyncExport.body.data.id}/cancel`, { method: 'POST', headers });
+  expect(completedCancel.response.status).toBe(409);
+  expect(completedCancel.body.error.code).toBe('JOB_NOT_CANCELLABLE');
+
+  const sourceAudits = await request(
+    `/api/v1/audit-logs?resource_type=source&resource_id=${sourceId}&limit=20`,
+    { headers },
+  );
+  expect(sourceAudits.response.status).toBe(200);
+  expect(sourceAudits.body.data).toHaveLength(4);
+  expect(new Set(sourceAudits.body.data.map((entry) => entry.action)))
+    .toEqual(new Set(['create', 'update', 'delete', 'restore']));
+  const sourceCreateAudit = sourceAudits.body.data.find((entry) => entry.action === 'create');
+  expect(sourceCreateAudit.request_id).toBe(sourceCreateRequestId);
+  expect(sourceCreateAudit.actor_type).toBe('user');
+  expect(sourceCreateAudit.metadata.changed_fields).toContain('source_type');
+  expect(sourceCreateAudit.after_data.license_text).toBeUndefined();
+
+  const sourceAuditDetail = await request(`/api/v1/audit-logs/${sourceCreateAudit.id}`, { headers });
+  expect(sourceAuditDetail.response.status).toBe(200);
+  expect(sourceAuditDetail.body.data.resource_id).toBe(sourceId);
+
+  const recordAudits = await request(
+    `/api/v1/audit-logs?resource_type=record&resource_id=${recordId}&limit=20`,
+    { headers },
+  );
+  expect(recordAudits.response.status).toBe(200);
+  expect(recordAudits.body.data).toHaveLength(7);
+  expect(new Set(recordAudits.body.data.map((entry) => entry.action)))
+    .toEqual(new Set(['create', 'update', 'delete', 'restore', 'submit_review', 'approve']));
+  expect(JSON.stringify(recordAudits.body.data)).not.toContain('pong');
+  expect(recordAudits.body.data.some(
+    (entry) => entry.metadata.version_fields_changed?.includes('content'),
+  )).toBe(true);
+
+  const apiKeySourceAudits = await request(
+    `/api/v1/audit-logs?resource_type=source&resource_id=${apiKeySourceId}`,
+    { headers },
+  );
+  expect(apiKeySourceAudits.response.status).toBe(200);
+  expect(apiKeySourceAudits.body.data).toHaveLength(1);
+  expect(apiKeySourceAudits.body.data[0].actor_type).toBe('api_key');
+  expect(apiKeySourceAudits.body.data[0].actor_id).toBe(sourceWriterKey.body.data.id);
+  expect(apiKeySourceAudits.body.data[0].metadata.actor_user_id).toBe(login.body.data.user.id);
+
+  const unfilteredAudit = await request('/api/v1/audit-logs?limit=1', { headers });
+  expect(unfilteredAudit.response.status).toBe(200);
+  expect(unfilteredAudit.body.data).toHaveLength(1);
+  expect(unfilteredAudit.body.meta.has_more).toBe(true);
+  expect(unfilteredAudit.body.meta.next_cursor).not.toBeNull();
+  const nextAuditPage = await request(
+    `/api/v1/audit-logs?limit=1&cursor=${encodeURIComponent(unfilteredAudit.body.meta.next_cursor)}`,
+    { headers },
+  );
+  expect(nextAuditPage.response.status).toBe(200);
+  expect(nextAuditPage.body.data).toHaveLength(1);
+  expect(nextAuditPage.body.data[0].id).not.toBe(unfilteredAudit.body.data[0].id);
+
+  const invalidAuditRange = await request(
+    '/api/v1/audit-logs?since=2026-08-31T10:00:00.000Z&until=2026-08-31T09:00:00.000Z',
+    { headers },
+  );
+  expect(invalidAuditRange.response.status).toBe(400);
+
   const refreshBody = JSON.stringify({ refresh_token: login.body.data.refresh_token });
   const rotations = await Promise.all([
     request('/api/v1/auth/refresh', {
@@ -350,4 +731,4 @@ integrationTest('validates API keys, sources, record concurrency, and refresh ro
   expect(revoked.response.status).toBe(200);
   const revokedUse = await request('/api/v1/records', { headers: apiKeyHeaders });
   expect(revokedUse.response.status).toBe(401);
-}, 15_000);
+}, 30_000);

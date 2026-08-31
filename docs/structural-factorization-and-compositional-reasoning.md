@@ -234,7 +234,7 @@ Factorや分解候補はengine versionごとに再評価できるようにし、
 
 ## 実装順序の依存関係
 
-現在の直近実装であるSource・Record監査ログを置き換えない。この研究実装は、少なくともEvent／Structureの最小表現、出典binding、推論候補と確定知識の分離が整った後に開始する。
+Source・Record監査ログは完了した。現在の直近実装であるアノテーション・タグ・評価の最小基盤を置き換えず、この研究実装は、少なくともEvent／Structureの最小表現、出典binding、推論候補と確定知識の分離が整った後に開始する。
 
 ```text
 監査・provenance基盤

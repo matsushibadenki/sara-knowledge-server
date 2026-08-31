@@ -1,0 +1,1 @@
+CREATE INDEX "audit_logs_action_timeline_idx" ON "system"."audit_logs" USING btree ("action","created_at");

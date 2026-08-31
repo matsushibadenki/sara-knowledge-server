@@ -4,6 +4,11 @@ import { z } from 'zod';
 import { requireAuth, requireRoles, requireScopes } from '../auth/middleware.js';
 import { db } from '../db/client.js';
 import { records, sources } from '../db/schema/index.js';
+import {
+  appendAuditLog,
+  changedFields,
+  sourceAuditSnapshot,
+} from '../services/audit.js';
 
 const sourceTypes = [
   'manual', 'website', 'document', 'book', 'dataset', 'conversation',
@@ -148,12 +153,24 @@ sourcesRoutes.post('/', requireScopes('sources:write'), requireRoles('admin', 'e
   }
 
   const now = new Date();
-  const [source] = await db.insert(sources).values({
-    ...sourceValues(result.data),
-    createdBy: c.get('auth').sub,
-    createdAt: now,
-    updatedAt: now,
-  }).returning();
+  const source = await db.transaction(async (tx) => {
+    const [created] = await tx.insert(sources).values({
+      ...sourceValues(result.data),
+      createdBy: c.get('auth').sub,
+      createdAt: now,
+      updatedAt: now,
+    }).returning();
+    const afterData = sourceAuditSnapshot(created);
+    await appendAuditLog(tx, c, {
+      action: 'create',
+      resourceType: 'source',
+      resourceId: created.id,
+      afterData,
+      metadata: { changed_fields: changedFields(null, afterData) },
+      createdAt: now,
+    });
+    return created;
+  });
 
   return c.json({ data: serializeSource(source), meta: {}, error: null }, 201);
 });
@@ -184,42 +201,100 @@ sourcesRoutes.patch('/:id', requireScopes('sources:write'), requireRoles('admin'
     return errorResponse(c, 400, 'VALIDATION_ERROR', 'Source update is invalid.', result.error.issues);
   }
 
-  const [source] = await db.update(sources)
-    .set({ ...sourceValues(result.data), updatedAt: new Date() })
-    .where(and(eq(sources.id, idResult.data), isNull(sources.deletedAt)))
-    .returning();
-  if (!source) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Source was not found.');
+  const now = new Date();
+  const outcome = await db.transaction(async (tx) => {
+    const [current] = await tx.select().from(sources)
+      .where(and(eq(sources.id, idResult.data), isNull(sources.deletedAt)))
+      .limit(1)
+      .for('update');
+    if (!current) return null;
+    const [source] = await tx.update(sources)
+      .set({ ...sourceValues(result.data), updatedAt: now })
+      .where(eq(sources.id, current.id))
+      .returning();
+    const beforeData = sourceAuditSnapshot(current);
+    const afterData = sourceAuditSnapshot(source);
+    await appendAuditLog(tx, c, {
+      action: 'update',
+      resourceType: 'source',
+      resourceId: source.id,
+      beforeData,
+      afterData,
+      metadata: { changed_fields: changedFields(beforeData, afterData) },
+      createdAt: now,
+    });
+    return source;
+  });
+  if (!outcome) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Source was not found.');
 
-  return c.json({ data: serializeSource(source), meta: {}, error: null });
+  return c.json({ data: serializeSource(outcome), meta: {}, error: null });
 });
 
 sourcesRoutes.delete('/:id', requireScopes('sources:write'), requireRoles('admin', 'editor'), async (c) => {
   const idResult = uuidSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Source ID must be a UUID.');
   const now = new Date();
-  const [source] = await db.update(sources)
-    .set({ deletedAt: now, updatedAt: now })
-    .where(and(eq(sources.id, idResult.data), isNull(sources.deletedAt)))
-    .returning();
-  if (!source) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Source was not found.');
+  const outcome = await db.transaction(async (tx) => {
+    const [current] = await tx.select().from(sources)
+      .where(and(eq(sources.id, idResult.data), isNull(sources.deletedAt)))
+      .limit(1)
+      .for('update');
+    if (!current) return null;
+    const [source] = await tx.update(sources)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(eq(sources.id, current.id))
+      .returning();
+    const beforeData = sourceAuditSnapshot(current);
+    const afterData = sourceAuditSnapshot(source);
+    await appendAuditLog(tx, c, {
+      action: 'delete',
+      resourceType: 'source',
+      resourceId: source.id,
+      beforeData,
+      afterData,
+      metadata: { changed_fields: changedFields(beforeData, afterData) },
+      createdAt: now,
+    });
+    return source;
+  });
+  if (!outcome) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Source was not found.');
 
-  return c.json({ data: serializeSource(source), meta: {}, error: null });
+  return c.json({ data: serializeSource(outcome), meta: {}, error: null });
 });
 
 sourcesRoutes.post('/:id/restore', requireScopes('sources:write'), requireRoles('admin', 'editor'), async (c) => {
   const idResult = uuidSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Source ID must be a UUID.');
-  const source = await findSource(idResult.data, true);
-  if (!source) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Source was not found.');
-  if (!source.deletedAt) return c.json({ data: serializeSource(source), meta: {}, error: null });
-
   const now = new Date();
-  const [restored] = await db.update(sources)
-    .set({ deletedAt: null, updatedAt: now })
-    .where(eq(sources.id, source.id))
-    .returning();
+  const outcome = await db.transaction(async (tx) => {
+    const [current] = await tx.select().from(sources)
+      .where(eq(sources.id, idResult.data))
+      .limit(1)
+      .for('update');
+    if (!current) return { error: 'not_found' };
+    if (!current.deletedAt) return { source: current };
+    const [source] = await tx.update(sources)
+      .set({ deletedAt: null, updatedAt: now })
+      .where(eq(sources.id, current.id))
+      .returning();
+    const beforeData = sourceAuditSnapshot(current);
+    const afterData = sourceAuditSnapshot(source);
+    await appendAuditLog(tx, c, {
+      action: 'restore',
+      resourceType: 'source',
+      resourceId: source.id,
+      beforeData,
+      afterData,
+      metadata: { changed_fields: changedFields(beforeData, afterData) },
+      createdAt: now,
+    });
+    return { source };
+  });
+  if (outcome.error === 'not_found') {
+    return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Source was not found.');
+  }
 
-  return c.json({ data: serializeSource(restored), meta: {}, error: null });
+  return c.json({ data: serializeSource(outcome.source), meta: {}, error: null });
 });
 
 export default sourcesRoutes;

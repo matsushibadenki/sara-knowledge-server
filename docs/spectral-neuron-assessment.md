@@ -213,7 +213,8 @@ PostgreSQLにはmodel family、matrix dimension、eigenvalue index、shape const
 ## 実装段階
 
 - [Done] Source APIとRecordの出典追跡基盤
-- [Next] Source・Record変更の監査ログを優先する
+- [Done] Source・Record変更の監査ログ
+- [Done] アノテーション・タグ・評価の最小スキーマとレビュー入口を優先して実装した
 - [Later] Stability Profileのbaseline datasetを作成する
 - [Later] 小dimensionのSpectral Neuron scorerを独立experimentとして再現する
 - [Later] 単純なbaselineとの精度・制約・費用比較を行う

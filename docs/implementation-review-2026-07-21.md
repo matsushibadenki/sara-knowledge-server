@@ -41,5 +41,9 @@
 - [Next] APIキーによるリクエスト認証とscope認可
 - [Next] ロール認可、ログイン試行制限、監査ログ
 - [Done] Source APIとRecordの出典登録フロー（2026-08-21完了）
-- [Next] Source・Record変更の監査ログ
+- [Done] Source・Record変更の監査ログ（2026-08-31完了）
+- [Done] アノテーション・タグ・評価の最小スキーマとレビュー入口
+- [Done] JSONL／JSON／CSV同期Import・Export
+- [Done] MinIOとWorkerによる大容量非同期処理
+- [Next] Dataset Definition・Snapshot・manifest生成
 - [Later] インポート、エクスポート、解析Worker、Knowledge構造化

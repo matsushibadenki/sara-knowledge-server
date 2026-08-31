@@ -6,5 +6,8 @@
   "scripts": {
     "dev": "bun --watch src/index.js",
     "start": "bun src/index.js"
+  },
+  "dependencies": {
+    "postgres": "^3.4.5"
   }
 }

@@ -28,7 +28,8 @@
 ## 次の優先事項
 
 - [Done] Source APIとRecordの出典登録フロー（2026-08-21完了）
-- [Next] Source・Record変更の監査ログ
+- [Done] Source・Record変更の監査ログ（2026-08-31完了）
+- [Done] アノテーション・タグ・評価の最小スキーマとレビュー入口
 - [Next] ユーザー管理APIとrole変更監査
 - [Later] API全体の用途別レート制限
 - [Later] APIキーローテーション支援

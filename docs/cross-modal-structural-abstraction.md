@@ -254,7 +254,7 @@ memory.cross_modal_transfer_evaluations
 
 ## 実装順序の依存関係
 
-現在の`[Next]`であるSource・Record監査ログを優先する。この研究はAsset API、Event／Structure最小表現、時間segment、出典bindingが整ってから開始する。
+Source・Record監査ログとアノテーション・タグ・評価の最小基盤は完了した。この研究はAsset API、Event／Structure最小表現、時間segment、出典bindingが整ってから開始する。
 
 ```text
 監査・Source・Asset基盤

@@ -103,6 +103,8 @@ service    JWTによるRecord・Source操作は不可。APIキーscopeを利用
 
 APIキーの発行・一覧・失効は現在`admin`専用とする。role不足は`403 INSUFFICIENT_ROLE`を返す。DBにも`admin / editor / reviewer / viewer / service`のCHECK制約を設定する。
 
+監査ログの一覧・詳細APIもJWTで認証した`admin`専用とする。監査情報には変更前後の属性やactor情報が含まれるため、APIキーには閲覧scopeを与えない。APIキーによるSource／Record変更自体は、APIキーIDをactorとして監査する。
+
 ## ログイン試行回数制限
 
 ログイン試行は、正規化したメールアドレスを秘密値でpepperしてSHA-256化し、Redisで固定窓カウンターとして管理する。メールアドレスそのものはRedisキーへ保存しない。

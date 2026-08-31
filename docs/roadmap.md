@@ -36,12 +36,20 @@
 - [Done] 許可Origin方式のCORS
 - [Done] 管理画面skeletonの日本語・英語・简体中文表示
 - [Done] lockfile固定のDocker build
+- [Done] Source・Record変更の同一トランザクション監査
+- [Done] admin専用監査一覧・詳細APIとrequest ID相関
 
 ## 将来の実装
 
-- [Next] Source・Record変更の監査ログ
-- [Later] アノテーション、タグ、評価
-- [Later] JSONL / JSON / CSVインポート・エクスポート
+- [Done] アノテーション・タグ・評価の最小スキーマとレビュー入口
+- [Done] レビュー申請・承認・拒否・修正要求の監査
+- [Done] JSONL / JSON / CSV同期インポート・エクスポート
+- [Done] Import原文・checksum・行別結果・冪等キー・部分成功
+- [Done] MinIO原本保管とWorkerによる大容量非同期Import／Export
+- [Done] Redis通知、SKIP LOCKED claim、chunk進捗、取消、stale Job再開
+- [Next] 再利用可能なDataset Definition・Snapshot・学習用manifest生成
+- [Later] login・APIキー・Import／Exportの監査拡張
+- [Later] 監査DB role分離、tamper evidence、保存期間・partition
 - [Later] データセット生成と品質管理
 - [Later] イベント、経験、概念、実体、関係
 - [Later] RISA / SARA Engine連携

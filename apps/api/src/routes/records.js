@@ -6,6 +6,11 @@ import { db } from '../db/client.js';
 import { recordVersions, records, sources } from '../db/schema/index.js';
 import { requireAuth, requireRoles, requireScopes } from '../auth/middleware.js';
 import { serializeSource } from './sources.js';
+import {
+  appendAuditLog,
+  changedFields,
+  recordAuditSnapshot,
+} from '../services/audit.js';
 
 const recordTypes = [
   'plain_text', 'instruction', 'qa', 'chat', 'sharegpt', 'chatml',
@@ -220,7 +225,21 @@ recordsRoutes.post('/', requireScopes('records:write'), requireRoles('admin', 'e
       .where(eq(records.id, recordId))
       .returning();
 
-    return { record: currentRecord || record, version, source };
+    const finalRecord = currentRecord || record;
+    const afterData = recordAuditSnapshot(finalRecord, version);
+    await appendAuditLog(tx, c, {
+      action: 'create',
+      resourceType: 'record',
+      resourceId: finalRecord.id,
+      afterData,
+      metadata: {
+        changed_fields: changedFields(null, afterData),
+        version_fields_changed: ['content', ...(input.plain_text === undefined ? [] : ['plain_text'])],
+      },
+      createdAt: now,
+    });
+
+    return { record: finalRecord, version, source };
   });
 
   if (created.error === 'source_not_found') {
@@ -281,6 +300,7 @@ recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin'
       .limit(1)
       .for('update');
     if (!record) return { error: 'not_found' };
+    if (record.status === 'pending_review') return { error: 'pending_review' };
 
     const [currentVersion] = await tx.select()
       .from(recordVersions)
@@ -329,6 +349,26 @@ recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin'
       .where(eq(records.id, record.id))
       .returning();
 
+    const beforeData = recordAuditSnapshot(record, currentVersion);
+    const afterData = recordAuditSnapshot(nextRecord, version);
+    const versionFieldsChanged = [
+      ...(input.content === undefined ? [] : ['content']),
+      ...(input.plain_text === undefined ? [] : ['plain_text']),
+      ...(input.schema_version === undefined ? [] : ['schema_version']),
+    ];
+    await appendAuditLog(tx, c, {
+      action: 'update',
+      resourceType: 'record',
+      resourceId: nextRecord.id,
+      beforeData,
+      afterData,
+      metadata: {
+        changed_fields: changedFields(beforeData, afterData),
+        version_fields_changed: versionFieldsChanged,
+      },
+      createdAt: now,
+    });
+
     return { record: nextRecord, version, source };
   });
 
@@ -341,6 +381,9 @@ recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin'
       current_version: updated.currentVersion,
     });
   }
+  if (updated.error === 'pending_review') {
+    return errorResponse(c, 409, 'RECORD_PENDING_REVIEW', 'A record cannot be changed while review is pending.');
+  }
   if (updated.error === 'source_not_found') {
     return errorResponse(c, 404, 'SOURCE_NOT_FOUND', 'The selected source was not found or is deleted.');
   }
@@ -351,32 +394,78 @@ recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin'
 recordsRoutes.delete('/:id', requireScopes('records:write'), requireRoles('admin', 'editor'), async (c) => {
   const idResult = uuidSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record ID must be a UUID.');
-  const record = await findRecord(idResult.data);
-  if (!record) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Record was not found.');
-
   const now = new Date();
-  const [deleted] = await db.update(records)
-    .set({ deletedAt: now, updatedAt: now })
-    .where(eq(records.id, record.id))
-    .returning();
+  const outcome = await db.transaction(async (tx) => {
+    const [record] = await tx.select().from(records)
+      .where(and(eq(records.id, idResult.data), isNull(records.deletedAt)))
+      .limit(1)
+      .for('update');
+    if (!record) return null;
+    if (record.status === 'pending_review') return { error: 'pending_review' };
+    const [version] = await tx.select().from(recordVersions)
+      .where(eq(recordVersions.id, record.currentVersionId))
+      .limit(1);
+    const [deleted] = await tx.update(records)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(eq(records.id, record.id))
+      .returning();
+    const beforeData = recordAuditSnapshot(record, version);
+    const afterData = recordAuditSnapshot(deleted, version);
+    await appendAuditLog(tx, c, {
+      action: 'delete',
+      resourceType: 'record',
+      resourceId: record.id,
+      beforeData,
+      afterData,
+      metadata: { changed_fields: changedFields(beforeData, afterData) },
+      createdAt: now,
+    });
+    return deleted;
+  });
+  if (!outcome) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Record was not found.');
+  if (outcome.error === 'pending_review') {
+    return errorResponse(c, 409, 'RECORD_PENDING_REVIEW', 'A record cannot be deleted while review is pending.');
+  }
 
-  return c.json({ data: serializeRecord(deleted), meta: {}, error: null });
+  return c.json({ data: serializeRecord(outcome), meta: {}, error: null });
 });
 
 recordsRoutes.post('/:id/restore', requireScopes('records:write'), requireRoles('admin', 'editor'), async (c) => {
   const idResult = uuidSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record ID must be a UUID.');
-  const record = await findRecord(idResult.data, true);
-  if (!record) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Record was not found.');
-  if (!record.deletedAt) return c.json({ data: serializeRecord(record), meta: {}, error: null });
-
   const now = new Date();
-  const [restored] = await db.update(records)
-    .set({ deletedAt: null, updatedAt: now })
-    .where(eq(records.id, record.id))
-    .returning();
+  const outcome = await db.transaction(async (tx) => {
+    const [record] = await tx.select().from(records)
+      .where(eq(records.id, idResult.data))
+      .limit(1)
+      .for('update');
+    if (!record) return { error: 'not_found' };
+    if (!record.deletedAt) return { record };
+    const [version] = await tx.select().from(recordVersions)
+      .where(eq(recordVersions.id, record.currentVersionId))
+      .limit(1);
+    const [restored] = await tx.update(records)
+      .set({ deletedAt: null, updatedAt: now })
+      .where(eq(records.id, record.id))
+      .returning();
+    const beforeData = recordAuditSnapshot(record, version);
+    const afterData = recordAuditSnapshot(restored, version);
+    await appendAuditLog(tx, c, {
+      action: 'restore',
+      resourceType: 'record',
+      resourceId: record.id,
+      beforeData,
+      afterData,
+      metadata: { changed_fields: changedFields(beforeData, afterData) },
+      createdAt: now,
+    });
+    return { record: restored };
+  });
+  if (outcome.error === 'not_found') {
+    return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Record was not found.');
+  }
 
-  return c.json({ data: serializeRecord(restored), meta: {}, error: null });
+  return c.json({ data: serializeRecord(outcome.record), meta: {}, error: null });
 });
 
 export default recordsRoutes;

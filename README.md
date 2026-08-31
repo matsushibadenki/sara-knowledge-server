@@ -6,7 +6,7 @@ AIの知識・経験・学習データをモデルの重みから切り離し、
 >
 > **简体中文：** 一个以 PostgreSQL 为权威数据源的 AI 知识与记忆服务器，用于保存可验证的数据、来源、版本历史和可复用结构，并独立于任何单一模型。
 
-現在はPhase 1の基盤実装中です。認証、Record API、Source APIと出典関連付けは動作しますが、Memory Schema、RISAの自己組織化、WordPress同期、完全な管理画面はまだ実装されていません。
+現在はPhase 1の基盤実装中です。認証、Record、Source、監査、品質レビュー、同期・非同期Import／ExportとWorkerは動作しますが、Memory Schema、RISAの自己組織化、WordPress同期、完全な管理画面はまだ実装されていません。
 
 ## 成功の定義
 
@@ -161,12 +161,14 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Done] 許可Origin方式のCORS
 - [Done] 管理画面skeletonの日本語・英語・简体中文表示
 - [Done] Source APIとRecordの出典登録フロー
-- [Next] Source・Record変更の監査ログ
+- [Done] Source・Record変更の監査ログとadmin閲覧API
+- [Done] アノテーション・タグ・評価とVersion固定レビュー
+- [Done] JSONL / JSON / CSV同期インポート・エクスポート
+- [Done] MinIO原本保管とWorkerによる大容量非同期Import／Export
+- [Next] Dataset Definition・Snapshot・学習用manifest生成
 
 ### 将来設計
 
-- [Later] アノテーション、品質評価、レビュー
-- [Later] JSONL / JSON / CSVのインポート・エクスポート
 - [Later] WordPress同期、HMAC、冪等性
 - [Later] Event、Experience、Concept、Entity、Relation
 - [Later] Structure、Delta、TransformationのMemory Schema
@@ -262,6 +264,29 @@ PATCH  /records/:id
 DELETE /records/:id
 POST   /records/:id/restore
 GET    /records/:id/versions
+GET    /records/:id/tags
+POST   /records/:id/tags
+DELETE /records/:id/tags/:tagId
+GET    /records/:id/annotations
+POST   /records/:id/annotations
+POST   /records/:id/annotations/:annotationId/resolve
+GET    /records/:id/evaluations
+POST   /records/:id/evaluations
+POST   /records/:id/submit-review
+GET    /records/:id/reviews
+POST   /records/:id/reviews/:reviewId/decision
+GET    /review-queue
+
+GET    /imports
+POST   /imports
+POST   /imports/async
+GET    /imports/:id
+POST   /imports/:id/cancel
+POST   /exports
+POST   /exports/async
+GET    /exports/:id
+GET    /exports/:id/download
+POST   /exports/:id/cancel
 
 GET    /sources
 POST   /sources
@@ -269,6 +294,9 @@ GET    /sources/:id
 PATCH  /sources/:id
 DELETE /sources/:id
 POST   /sources/:id/restore
+
+GET    /audit-logs
+GET    /audit-logs/:id
 ```
 
 JWTアクセストークンまたは`sara_`プレフィックスのAPIキーをBearer Tokenとして送信します。Record更新では競合検出のため`expected_version`が必要です。Recordへ出典を関連付ける場合は、先にSourceを作成して`source_id`を指定します。
@@ -277,11 +305,16 @@ JWTアクセストークンまたは`sara_`プレフィックスのAPIキーをB
 Authorization: Bearer <JWT or sara_API_KEY>
 ```
 
-認証、Record、Source形式の詳細:
+監査ログの閲覧はJWTの`admin`専用です。APIキーでは閲覧できません。
+
+認証、Record、Source、品質・レビュー、監査形式の詳細:
 
 - [`docs/authentication.md`](docs/authentication.md)
 - [`docs/records.md`](docs/records.md)
 - [`docs/sources.md`](docs/sources.md)
+- [`docs/audit-logs.md`](docs/audit-logs.md)
+- [`docs/quality-and-review.md`](docs/quality-and-review.md)
+- [`docs/import-export.md`](docs/import-export.md)
 
 ## テスト
 

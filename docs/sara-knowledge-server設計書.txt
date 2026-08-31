@@ -1477,6 +1477,12 @@ api_key_create
 api_key_revoke
 ```
 
+現在の実装範囲はSourceとRecordの`create / update / delete / restore`である。対象変更と監査INSERTを同一DBトランザクションに含める。Record本文、plain text、Source license全文、metadata値は監査へ複製せず、親属性、Version識別子、変更field、metadataキーを保存する。
+
+監査閲覧はJWTのadmin専用とし、APIキーには許可しない。すべてのHTTP応答にserver-generated `X-Request-ID`を付け、監査の`request_id`と相関させる。APIキーによる変更ではactor_idをAPIキーID、metadataのactor_user_idを所有ユーザーIDとする。
+
+現在はアプリケーション上の追記専用であり、DB role分離やtamper-evident storageは未実装である。信頼proxy境界が確定するまで転送headerからIPアドレスを記録しない。
+
 ## 10.2 system.sync_states
 
 WordPressなど外部システムとの同期状態。
@@ -2064,6 +2070,17 @@ relation.created
 ```
 
 WebhookにはHMAC-SHA256署名を付ける。
+
+## 12.18 監査ログ
+
+```text
+GET /audit-logs
+GET /audit-logs/:id
+```
+
+現在はJWTで認証したadminだけが閲覧できる。APIキー、editor、reviewer、viewerには公開しない。更新・削除APIは提供しない。
+
+一覧は`limit`、`cursor`、`action`、`resource_type`、`resource_id`、`actor_id`、`request_id`、`since`、`until`で絞り込める。深いOFFSETを避けるため、`created_at + id`によるcursor paginationを使用する。`resource_id`指定時は`resource_type`も必須とする。
 
 ---
 
@@ -3210,6 +3227,54 @@ OpenAPIを表示できる
 ---
 
 # 33. アーキテクチャ上の最終原則
+
+大容量Import／Exportでは、原本と成果物をMinIOへ保存し、Redis ListでWorkerへ通知する。ただしRedisをJob状態の正本にはしない。PostgreSQLのImport／Export Jobを唯一の状態正本とし、Workerは`FOR UPDATE SKIP LOCKED`でqueued Jobを非待機claimする。これにより複数Workerが同じJobを同時処理しない。
+
+```text
+API
+├── MinIOへ原本保存
+├── PostgreSQLへqueued Job保存
+└── Redisへ通知
+          ↓
+Worker
+├── PostgreSQLでJob claim
+├── chunk処理・進捗保存
+├── 取消要求確認
+└── MinIOへExport成果物保存
+```
+
+Importは既定50行単位で進捗を更新し、RecordとVersionの保存は短いトランザクションへ分離する。Worker停止後5分以上processingのJobはqueuedへ戻し、`import_items`の最大行番号と成功・失敗件数から次の行を再開する。Redis通知が消失してもWorkerはPostgreSQLをpollする。
+
+非同期Importの既定上限は100 MiB・100,000行、非同期Exportは100,000 Recordとする。これは無制限処理を許可する値ではなく、運用計測前の安全上限である。将来のmulti-part upload、真正なstream parser、Exportの分割object／manifestは実データで必要性を確認して追加する。
+
+同期Import／Export基盤ではJSON、JSONL、CSVをcanonical Recordへ変換する。Import原文、SHA-256、byte数、形式、冪等キー、行別結果をPostgreSQLへ保存し、Import単位で`source_type=imported`のSourceを作成する。正常行と失敗行を分離し、各正常行は短い独立トランザクションでRecord、初期Version、Import Item、監査ログを作成する。
+
+```text
+Import Job
+├── raw content + checksum
+├── imported Source
+└── Import Item
+    ├── succeeded → Record + Version
+    └── failed    → error code + message
+```
+
+同じ作成者の冪等キーは一意とし、同じchecksumの再送だけを既存Jobとして受理する。異なる原文によるキー再利用は競合として拒否する。同期APIは5 MiB・1,000行、Exportは1,000 Recordへ制限する。大容量処理ではAPIトランザクションを長時間保持せず、原本をMinIOへ保存してRedis QueueとWorkerでchunk処理する。
+
+Exportは論理削除されていないRecordの現在Versionだけを対象とし、format、filter、件数、byte数、SHA-256をJob履歴へ保存する。過去Version、Annotation、Evaluation、Reviewを含むdataset packageは別仕様として扱う。
+
+実装済みの品質管理層では、共有Tag、Record Version固定のAnnotation、追記型Evaluation、Record Version固定のReviewを`dataset` schemaへ保存する。Review待ちはRecordごとに1件とし、申請中のRecord更新・削除を禁止する。承認、拒否、修正要求はRecord状態変更と同じトランザクションで処理し、監査ログへ記録する。これにより、評価対象だった本文と判定履歴の対応を失わない。
+
+```text
+Record Version
+├── Annotation
+├── Evaluation
+└── Review
+      ├── approved
+      ├── rejected
+      └── changes_requested
+```
+
+AnnotationとEvaluationを後から別Versionへ付け替えない。EvaluationからRecordの品質scoreを自動集約する方式、複数レビュアーの合議、Tag別名統合は、利用データを得てから設計する。
 
 ```text
 WordPress
