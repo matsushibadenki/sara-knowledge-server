@@ -37,10 +37,30 @@ drizzle.__drizzle_migrations
 - `dataset.import_jobs`
 - `dataset.import_items`
 - `dataset.export_jobs`
+- `dataset.dataset_definitions`
+- `dataset.dataset_snapshots`
+- `dataset.dataset_snapshot_records`
 
 ### `system`
 
 - `system.audit_logs`
+
+### `training`
+
+- `training.models`
+- `training.runs`
+- `training.metrics`
+
+### `memory`
+
+- `memory.experiences`
+- `memory.events`
+- `memory.entities`
+- `memory.concepts`
+- `memory.relations`
+- `memory.entity_aliases`
+- `memory.relation_evidence`
+- `memory.verification_decisions`
 
 ### 拡張
 
@@ -81,6 +101,25 @@ PostgreSQLの初期化時と冪等migrationで以下を有効化する。既存v
 - Worker claim対象だけを含む部分索引を使用し、`FOR UPDATE SKIP LOCKED`で複数Workerの競合待ちを避ける
 - MinIO object key、worker ID、開始時刻、処理済み件数、取消要求をJobへ保存する
 - 5分以上古いprocessing JobはWorker起動時にqueuedへ戻し、既存Import Itemの最大行から再開する
+- Dataset Definitionは再利用可能な抽出条件とmanifest形式を保持する
+- Dataset Snapshotは作成時点のDefinition revision、filter、Record Version、順序を固定する
+- Snapshot作成後にRecordの現在版やDefinitionを変更しても、既存Snapshotの構成は変更しない
+- Snapshotのメンバー選択と固定は短い同一トランザクションで行い、MinIOへのmanifest保存はトランザクション外で行う
+- 同期Snapshotは10,000 Recordを上限とし、より大きいbuildは将来のWorker処理へ分離する
+- Model Registryは変更可能だが、Training Runは作成時点のModel定義を`model_snapshot`へ固定する
+- Training Runは完成済みの所有Dataset Snapshotだけを参照する
+- Run statusとstarted／finished timestampの組み合わせはDB CHECK制約で保証する
+- Run状態遷移は更新前statusを条件に含め、同時遷移を競合として拒否する
+- Metricは追記型とし、Run・metric name・split・stepを一意にする
+- Memory nodeは作成者内UIDを一意にし、通常検索は論理削除されていない行だけを対象にする
+- EventはSourceとExperienceをFK参照し、各外部キーを索引化する
+- EntityとConceptはSource provenance、proposal source、verification stateを保持する
+- Relation node typeはDB CHECK、参照先存在・所有者・有効状態はサービス層で検証する
+- Relationのincoming／outgoing検索にはactive行だけの部分複合索引を使用する
+- Entity AliasはNFKC等で正規化し、Entity・language・normalized aliasを有効行内で一意にする
+- Relation Evidenceは追記型とし、追加とRelation count更新を同一トランザクションで行う
+- Verification Decisionは追記型とし、対象状態の条件付き更新と同一トランザクションで保存する
+- verification stateは通常PATCHで変更せず、`memory:verify`を持つreviewer/adminだけが遷移させる
 
 ## コマンド
 
@@ -111,10 +150,16 @@ docker compose exec api bun run db:migrate
 - [Done] Record Version固定のレビュー申請・判定・待ち行列
 - [Done] 同期Import／Exportジョブと原文・行別結果スキーマ
 - [Done] MinIO Asset参照、Redis通知、非同期Worker処理
-- [Next] Dataset Definition・Snapshot・manifest Schema
+- [Done] Dataset Definition・不変Snapshot・manifest Schema
+- [Done] Training Run・Snapshot利用履歴・評価結果Schema
+- [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
+- [Done] Relation Evidence・Entity Alias・候補検証フロー
+- [Done] Bulk Event ingestion・bounded graph traversal
+- [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
+- [Next] Queue-backed asynchronous Event ingestion for batches over 500
 
 ## 将来のMemory Schema
 
-Structure、型付きDelta、Transformation Pattern、自己組織化する共有Unit、力学的なStability ProfileとReplay履歴は設計採用済みだが、現在のmigrationにはまだ追加しない。出典追跡、監査、データ品質、レビューの最小基盤は完成したため、次に一括取り込みと出力を実装する。
+Structure、型付きDelta、Transformation Pattern、自己組織化する共有Unit、力学的なStability ProfileとReplay履歴は設計採用済みだが、現在のmigrationにはまだ追加しない。外部WorkerのHMAC署名・nonce replay防止まで完成した。次は500件を超えるEvent batchをqueue経由で処理する。
 
 StructureとDeltaの将来スキーマは`structure-delta-transformation-memory.md`、共有Unitの実験設計は`self-organizing-shared-representations.md`、動的検証は`dynamical-structural-validation.md`を参照する。UnitとStability関連スキーマはtoy experimentで有効性を確認してから確定する。

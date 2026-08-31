@@ -8,6 +8,9 @@ import sourcesRoutes from './routes/sources.js';
 import auditLogRoutes from './routes/audit-logs.js';
 import recordQualityRoutes, { reviewQueueRoutes } from './routes/record-quality.js';
 import { exportRoutes, importRoutes } from './routes/import-export.js';
+import datasetRoutes from './routes/datasets.js';
+import trainingRoutes from './routes/training.js';
+import memoryRoutes from './routes/memory.js';
 
 const app = new Hono();
 const allowedOrigins = new Set(
@@ -26,7 +29,7 @@ app.use('*', async (c, next) => {
 
 app.use('*', cors({
   origin: (origin) => allowedOrigins.has(origin) ? origin : '',
-  allowHeaders: ['Authorization', 'Content-Type'],
+  allowHeaders: ['Authorization', 'Content-Type', 'X-SARA-Timestamp', 'X-SARA-Nonce', 'X-SARA-Idempotency-Key', 'X-SARA-Signature'],
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   exposeHeaders: ['X-Request-ID', 'X-Export-ID', 'X-Content-SHA256', 'Content-Disposition'],
   maxAge: 86400,
@@ -171,6 +174,90 @@ app.get('/openapi.json', (c) => c.json({
     '/exports/{id}/cancel': {
       post: { summary: 'Request cancellation of an async export', security: [{ bearerAuth: [] }], 'x-required-scope': 'exports:create' },
     },
+    '/datasets': {
+      get: { summary: 'List reusable dataset definitions', security: [{ bearerAuth: [] }], 'x-required-scope': 'datasets:read' },
+      post: { summary: 'Create a dataset definition', security: [{ bearerAuth: [] }], 'x-required-scope': 'datasets:write' },
+    },
+    '/datasets/{id}': {
+      get: { summary: 'Get a dataset definition', security: [{ bearerAuth: [] }], 'x-required-scope': 'datasets:read' },
+      patch: { summary: 'Update a dataset definition', security: [{ bearerAuth: [] }], 'x-required-scope': 'datasets:write' },
+    },
+    '/datasets/{id}/snapshots': {
+      get: { summary: 'List immutable snapshots', security: [{ bearerAuth: [] }], 'x-required-scope': 'datasets:read' },
+      post: { summary: 'Freeze current matching Record versions and create a manifest', security: [{ bearerAuth: [] }], 'x-required-scope': 'datasets:write' },
+    },
+    '/datasets/{id}/snapshots/{snapshotId}/manifest': {
+      get: { summary: 'Download an immutable training manifest', security: [{ bearerAuth: [] }], 'x-required-scope': 'datasets:read' },
+    },
+    '/training/models': {
+      get: { summary: 'List owned model definitions', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:read' },
+      post: { summary: 'Register a model definition', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:write' },
+    },
+    '/training/models/{id}': {
+      get: { summary: 'Get a model definition', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:read' },
+      patch: { summary: 'Update a model definition', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:write' },
+    },
+    '/training/runs': {
+      get: { summary: 'List owned training runs', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:read' },
+      post: { summary: 'Create a reproducible run from a completed dataset snapshot', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:write' },
+    },
+    '/training/runs/{id}': {
+      get: { summary: 'Get a training run with append-only metrics', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:read' },
+    },
+    '/training/runs/{id}/status': {
+      post: { summary: 'Apply a guarded training run status transition', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:write' },
+    },
+    '/training/runs/{id}/metrics': {
+      get: { summary: 'List append-only run metrics', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:read' },
+      post: { summary: 'Append a run metric', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:write' },
+    },
+    '/memory/experiences': {
+      get: { summary: 'List owned experiences', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      post: { summary: 'Create a provenance-bound experience', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
+    },
+    '/memory/events': {
+      get: { summary: 'List owned events', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      post: { summary: 'Create a temporal event', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
+    },
+    '/memory/events/bulk': {
+      post: {
+        summary: 'Atomically ingest an idempotent event batch',
+        description: 'API keys additionally require X-SARA-Timestamp, X-SARA-Nonce, X-SARA-Idempotency-Key, and X-SARA-Signature. JWT requests do not.',
+        security: [{ bearerAuth: [] }],
+        'x-required-scope': 'memory:write',
+        'x-api-key-hmac-required': true,
+      },
+    },
+    '/memory/entities': {
+      get: { summary: 'List owned entities', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      post: { summary: 'Create an entity candidate', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
+    },
+    '/memory/entities/{id}/aliases': {
+      get: { summary: 'List normalized entity aliases', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      post: { summary: 'Create an entity alias candidate', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
+    },
+    '/memory/concepts': {
+      get: { summary: 'List owned concepts', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      post: { summary: 'Create a concept candidate', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
+    },
+    '/memory/relations': {
+      get: { summary: 'List owned typed relations', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      post: { summary: 'Create a relation after validating both nodes', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
+    },
+    '/memory/relations/{id}/evidence': {
+      get: { summary: 'List append-only relation evidence', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      post: { summary: 'Append evidence and atomically update relation counts', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
+    },
+    '/memory/verification/{type}/{id}': {
+      get: { summary: 'List verification decision history', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      post: { summary: 'Apply a guarded verification transition', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:verify', 'x-allowed-user-roles': ['admin', 'reviewer'] },
+    },
+    '/memory/nodes/{type}/{id}/neighbors': {
+      get: { summary: 'List incoming and outgoing active relations', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+    },
+    '/memory/traverse': {
+      post: { summary: 'Traverse an owned memory graph within hard depth and size limits', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+    },
     '/sources': {
       get: { summary: 'List sources', security: [{ bearerAuth: [] }], 'x-required-scope': 'sources:read', 'x-allowed-user-roles': ['admin', 'editor', 'reviewer', 'viewer'] },
       post: { summary: 'Create a source', security: [{ bearerAuth: [] }], 'x-required-scope': 'sources:write', 'x-allowed-user-roles': ['admin', 'editor'] },
@@ -204,6 +291,12 @@ app.route('/imports', importRoutes);
 app.route('/api/v1/imports', importRoutes);
 app.route('/exports', exportRoutes);
 app.route('/api/v1/exports', exportRoutes);
+app.route('/datasets', datasetRoutes);
+app.route('/api/v1/datasets', datasetRoutes);
+app.route('/training', trainingRoutes);
+app.route('/api/v1/training', trainingRoutes);
+app.route('/memory', memoryRoutes);
+app.route('/api/v1/memory', memoryRoutes);
 app.route('/sources', sourcesRoutes);
 app.route('/api/v1/sources', sourcesRoutes);
 app.route('/audit-logs', auditLogRoutes);

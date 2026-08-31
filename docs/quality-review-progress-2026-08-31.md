@@ -11,4 +11,8 @@
 - [Done] auth／datasetスキーマの外部キー索引漏れ0件
 - [Done] JSONL／JSON／CSV同期Import・Export
 - [Done] MinIOとWorkerによる大容量非同期処理
-- [Next] Dataset Definition・Snapshot・manifest生成
+- [Done] Dataset Definition・不変Snapshot・manifest生成
+- [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
+- [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
+- [Done] Relation Evidence・Entity Alias・候補検証フロー
+- [Next] Bulk Event ingestion・bounded graph traversal

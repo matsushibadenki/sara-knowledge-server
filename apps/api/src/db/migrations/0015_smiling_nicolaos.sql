@@ -1,0 +1,1 @@
+ALTER TABLE "training"."runs" ADD COLUMN "model_snapshot" jsonb NOT NULL;

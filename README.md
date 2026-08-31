@@ -6,7 +6,7 @@ AIの知識・経験・学習データをモデルの重みから切り離し、
 >
 > **简体中文：** 一个以 PostgreSQL 为权威数据源的 AI 知识与记忆服务器，用于保存可验证的数据、来源、版本历史和可复用结构，并独立于任何单一模型。
 
-現在はPhase 1の基盤実装中です。認証、Record、Source、監査、品質レビュー、同期・非同期Import／ExportとWorkerは動作しますが、Memory Schema、RISAの自己組織化、WordPress同期、完全な管理画面はまだ実装されていません。
+現在はPhase 1の基盤実装中です。認証、Record、Source、監査、品質レビュー、Import／Export、Dataset Snapshot、Training Run、Memory Core、Evidence・Alias・Verificationは動作しますが、graph traversal、RISAの自己組織化、WordPress同期、完全な管理画面はまだ実装されていません。
 
 ## 成功の定義
 
@@ -165,11 +165,17 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Done] アノテーション・タグ・評価とVersion固定レビュー
 - [Done] JSONL / JSON / CSV同期インポート・エクスポート
 - [Done] MinIO原本保管とWorkerによる大容量非同期Import／Export
-- [Next] Dataset Definition・Snapshot・学習用manifest生成
+- [Done] Dataset Definition・不変Snapshot・学習用manifest生成
+- [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
+- [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
+- [Done] Relation Evidence・Entity Alias・候補検証フロー
+- [Done] Bulk Event ingestion・bounded graph traversal
+- [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
+- [Next] Queue-backed asynchronous Event ingestion for batches over 500
 
 ### 将来設計
 
-- [Later] WordPress同期、HMAC、冪等性
+- [Later] WordPress signed sync adapter、差分同期、障害再送
 - [Later] Event、Experience、Concept、Entity、Relation
 - [Later] Structure、Delta、TransformationのMemory Schema
 - [Later] 自己組織化Unit、residual、Assemblyの研究プロトタイプ
@@ -288,6 +294,66 @@ GET    /exports/:id
 GET    /exports/:id/download
 POST   /exports/:id/cancel
 
+GET    /datasets
+POST   /datasets
+GET    /datasets/:id
+PATCH  /datasets/:id
+GET    /datasets/:id/snapshots
+POST   /datasets/:id/snapshots
+GET    /datasets/:id/snapshots/:snapshotId
+GET    /datasets/:id/snapshots/:snapshotId/manifest
+
+GET    /training/models
+POST   /training/models
+GET    /training/models/:id
+PATCH  /training/models/:id
+GET    /training/runs
+POST   /training/runs
+GET    /training/runs/:id
+POST   /training/runs/:id/status
+GET    /training/runs/:id/metrics
+POST   /training/runs/:id/metrics
+
+GET    /memory/experiences
+POST   /memory/experiences
+GET    /memory/experiences/:id
+PATCH  /memory/experiences/:id
+DELETE /memory/experiences/:id
+
+GET    /memory/events
+POST   /memory/events
+POST   /memory/events/bulk
+GET    /memory/events/:id
+PATCH  /memory/events/:id
+DELETE /memory/events/:id
+POST   /memory/traverse
+
+GET    /memory/entities
+POST   /memory/entities
+GET    /memory/entities/:id
+PATCH  /memory/entities/:id
+DELETE /memory/entities/:id
+
+GET    /memory/concepts
+POST   /memory/concepts
+GET    /memory/concepts/:id
+PATCH  /memory/concepts/:id
+DELETE /memory/concepts/:id
+
+GET    /memory/relations
+POST   /memory/relations
+GET    /memory/relations/:id
+PATCH  /memory/relations/:id
+DELETE /memory/relations/:id
+GET    /memory/nodes/:type/:id/neighbors
+GET    /memory/entities/:id/aliases
+POST   /memory/entities/:id/aliases
+DELETE /memory/entities/:entityId/aliases/:aliasId
+GET    /memory/relations/:id/evidence
+POST   /memory/relations/:id/evidence
+GET    /memory/verification/:type/:id
+POST   /memory/verification/:type/:id
+
 GET    /sources
 POST   /sources
 GET    /sources/:id
@@ -315,6 +381,10 @@ Authorization: Bearer <JWT or sara_API_KEY>
 - [`docs/audit-logs.md`](docs/audit-logs.md)
 - [`docs/quality-and-review.md`](docs/quality-and-review.md)
 - [`docs/import-export.md`](docs/import-export.md)
+- [`docs/dataset-snapshots.md`](docs/dataset-snapshots.md)
+- [`docs/training-runs.md`](docs/training-runs.md)
+- [`docs/memory-core.md`](docs/memory-core.md)
+- [`docs/evidence-alias-verification.md`](docs/evidence-alias-verification.md)
 
 ## テスト
 

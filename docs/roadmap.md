@@ -47,13 +47,21 @@
 - [Done] Import原文・checksum・行別結果・冪等キー・部分成功
 - [Done] MinIO原本保管とWorkerによる大容量非同期Import／Export
 - [Done] Redis通知、SKIP LOCKED claim、chunk進捗、取消、stale Job再開
-- [Next] 再利用可能なDataset Definition・Snapshot・学習用manifest生成
+- [Done] 再利用可能なDataset Definition・不変Snapshot・学習用manifest生成
+- [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
+- [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
+- [Done] Relation Evidence・Entity Alias・候補検証フロー
+- [Done] Bulk Event ingestion・bounded graph traversal
+- [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
+- [Next] Queue-backed asynchronous Event ingestion for batches over 500
 - [Later] login・APIキー・Import／Exportの監査拡張
 - [Later] 監査DB role分離、tamper evidence、保存期間・partition
-- [Later] データセット生成と品質管理
-- [Later] イベント、経験、概念、実体、関係
+- [Later] Dataset split・大規模非同期build・モデル別変換器
+- [Later] checkpoint／artifact詳細、Run比較、trainer callback認証
+- [Later] confidence calibration、独立Source集計、合議レビュー
+- [Later] Embedding、Activation、Replay
 - [Later] RISA / SARA Engine連携
-- [Later] WordPress同期、HMAC、冪等性
+- [Later] WordPress signed sync adapter、差分同期、障害再送
 - [Later] ベクトル検索、価値駆動学習、Research Queue
 - [Later] フィードバック駆動の構造更新と予測誤差の監査
 - [Later] 構造パターン・適用事例・類似構造のMemory Schema

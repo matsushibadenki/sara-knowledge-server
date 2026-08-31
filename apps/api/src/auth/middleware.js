@@ -73,6 +73,7 @@ function createAuthMiddleware({ allowApiKeys }) {
       if (!result) return authenticationError(c);
       c.set('auth', result.auth);
       c.set('authUser', result.user);
+      c.set('apiKeySecret', token);
       return next();
     }
 

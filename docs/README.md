@@ -20,6 +20,10 @@
 
 ## 現在の主要ドキュメント
 
+- `signed-worker-ingestion.md`: 外部WorkerのHMAC署名、nonce、冪等再送、配置境界
+- `signed-worker-ingestion-progress-2026-08-31.md`: 署名取り込み節目の実装・検証記録
+- `bulk-event-and-bounded-traversal.md`: 原子的Bulk Event取り込み、制限付き探索、外部Worker境界
+- `bulk-event-traversal-progress-2026-08-31.md`: 同節目の実装・検証記録
 - `sara-knowledge-server設計書.txt`: 全体設計仕様書
 - `roadmap.md`: 実装進捗と次工程
 - `database.md`: DBスキーマとmigration運用
@@ -32,6 +36,14 @@
 - `import-export.md`: JSON／JSONL／CSV取り込み・出力、冪等性、上限
 - `import-export-progress-2026-08-31.md`: Import／Export節目の実装・検証記録
 - `async-worker-progress-2026-08-31.md`: MinIO・Redis・Worker非同期処理の実装記録
+- `dataset-snapshots.md`: 再利用可能なDataset Definition、不変Snapshot、manifest仕様
+- `dataset-snapshot-progress-2026-08-31.md`: Dataset Snapshot節目の実装・検証記録
+- `training-runs.md`: Model Registry、再現可能なTraining Run、追記型Metric仕様
+- `training-run-progress-2026-08-31.md`: Training Run節目の実装・検証記録
+- `memory-core.md`: Event・Experience・Entity・Concept・Relationの中核仕様
+- `memory-core-progress-2026-08-31.md`: Memory Core節目の実装・検証記録
+- `evidence-alias-verification.md`: Relation Evidence、Alias正規化、候補検証仕様
+- `evidence-alias-verification-progress-2026-08-31.md`: Evidence・Alias・Verification節目の検証記録
 - `late-labeling-and-emergent-concepts.md`: 遅延ラベリングと創発的概念形成の研究仮説
 - `feedback-driven-structural-updates.md`: フィードバック駆動の構造更新方針
 - `structural-knowledge-emergence.md`: 構造共有・再利用・未知関係候補生成の研究設計

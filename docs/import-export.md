@@ -117,5 +117,9 @@ Job一覧・詳細は認証主体の所有Jobだけを返す。Importで生成�
 - [Done] 原文、checksum、冪等性、部分成功、行別エラー
 - [Done] MinIO原本AssetとRedis Queue
 - [Done] Workerによるchunk処理、再開、取消、進捗
-- [Next] Dataset Definition・Snapshot・manifest生成
+- [Done] Dataset Definition・不変Snapshot・manifest生成
+- [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
+- [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
+- [Done] Relation Evidence・Entity Alias・候補検証フロー
+- [Next] Bulk Event ingestion・bounded graph traversal
 - [Later] Parquet／Apache Arrow

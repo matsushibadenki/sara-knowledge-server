@@ -13,7 +13,11 @@
 - [Done] Docker上の全10テスト・192 assertions成功、失敗0件
 - [Done] auth／datasetスキーマの外部キー索引漏れ0件
 - [Done] PostgreSQL、Redis、MinIO readiness正常、Worker error logなし
-- [Next] Dataset Definition・Snapshot・学習用manifest生成
+- [Done] Dataset Definition・不変Snapshot・学習用manifest生成
+- [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
+- [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
+- [Done] Relation Evidence・Entity Alias・候補検証フロー
+- [Next] Bulk Event ingestion・bounded graph traversal
 
 > **English:** Redis is a notification channel; PostgreSQL remains the authoritative job state. MinIO stores source and result objects.
 >

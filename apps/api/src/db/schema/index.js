@@ -24,6 +24,8 @@ const auditColumns = {
 
 export const authSchema = pgSchema('auth');
 export const datasetSchema = pgSchema('dataset');
+export const memorySchema = pgSchema('memory');
+export const trainingSchema = pgSchema('training');
 export const systemSchema = pgSchema('system');
 
 export const users = authSchema.table('users', {
@@ -78,6 +80,21 @@ export const apiKeys = authSchema.table('api_keys', {
   userIdIndex: index('api_keys_user_id_idx').on(table.userId),
   activeExpiryIndex: index('api_keys_active_expiry_idx').on(table.expiresAt)
     .where(sql`${table.revokedAt} IS NULL`),
+}));
+
+export const apiRequestNonces = authSchema.table('api_request_nonces', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  apiKeyId: uuid('api_key_id').notNull().references(() => apiKeys.id, { onDelete: 'cascade' }),
+  nonce: text('nonce').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  requestHash: text('request_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  apiKeyNonceUnique: uniqueIndex('api_request_nonces_key_nonce_unique').on(table.apiKeyId, table.nonce),
+  expiryIndex: index('api_request_nonces_expiry_idx').on(table.expiresAt),
+  apiKeyIdempotencyIndex: index('api_request_nonces_key_idempotency_idx')
+    .on(table.apiKeyId, table.idempotencyKey, table.createdAt),
 }));
 
 export const sources = datasetSchema.table('sources', {
@@ -329,6 +346,371 @@ export const exportJobs = datasetSchema.table('export_jobs', {
   formatCheck: check('export_jobs_format_check', sql`${table.format} IN ('json', 'jsonl', 'csv')`),
   statusCheck: check('export_jobs_status_check', sql`${table.status} IN ('queued', 'processing', 'completed', 'failed', 'cancelled')`),
   countsCheck: check('export_jobs_counts_check', sql`${table.recordCount} >= 0 AND ${table.byteSize} >= 0`),
+}));
+
+export const datasetDefinitions = datasetSchema.table('dataset_definitions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  filters: jsonb('filters').notNull().default({}),
+  manifestFormat: text('manifest_format').notNull().default('json'),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  ...auditColumns,
+}, (table) => ({
+  creatorNameUnique: uniqueIndex('dataset_definitions_creator_name_unique').on(table.createdBy, table.name),
+  creatorTimelineIndex: index('dataset_definitions_creator_timeline_idx').on(table.createdBy, table.updatedAt),
+  activeIndex: index('dataset_definitions_active_idx').on(table.updatedAt).where(sql`${table.deletedAt} IS NULL`),
+  manifestFormatCheck: check('dataset_definitions_manifest_format_check', sql`${table.manifestFormat} IN ('json', 'jsonl')`),
+}));
+
+export const datasetSnapshots = datasetSchema.table('dataset_snapshots', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  definitionId: uuid('definition_id').notNull().references(() => datasetDefinitions.id),
+  status: text('status').notNull().default('building'),
+  definitionRevision: timestamp('definition_revision', { withTimezone: true }).notNull(),
+  filters: jsonb('filters').notNull(),
+  manifestFormat: text('manifest_format').notNull(),
+  recordCount: integer('record_count').notNull().default(0),
+  manifestObjectKey: text('manifest_object_key'),
+  manifestHash: text('manifest_hash'),
+  errorMessage: text('error_message'),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, (table) => ({
+  definitionTimelineIndex: index('dataset_snapshots_definition_timeline_idx').on(table.definitionId, table.createdAt),
+  createdByIndex: index('dataset_snapshots_created_by_idx').on(table.createdBy),
+  buildingIndex: index('dataset_snapshots_building_idx').on(table.createdAt).where(sql`${table.status} = 'building'`),
+  statusCheck: check('dataset_snapshots_status_check', sql`${table.status} IN ('building', 'completed', 'failed')`),
+  formatCheck: check('dataset_snapshots_format_check', sql`${table.manifestFormat} IN ('json', 'jsonl')`),
+  countCheck: check('dataset_snapshots_record_count_check', sql`${table.recordCount} >= 0`),
+}));
+
+export const datasetSnapshotRecords = datasetSchema.table('dataset_snapshot_records', {
+  snapshotId: uuid('snapshot_id').notNull().references(() => datasetSnapshots.id, { onDelete: 'cascade' }),
+  recordId: uuid('record_id').notNull().references(() => records.id),
+  recordVersionId: uuid('record_version_id').notNull().references(() => recordVersions.id),
+  ordinal: integer('ordinal').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  primaryKey: primaryKey({ columns: [table.snapshotId, table.recordId] }),
+  snapshotOrdinalUnique: uniqueIndex('dataset_snapshot_records_snapshot_ordinal_unique').on(table.snapshotId, table.ordinal),
+  recordIdIndex: index('dataset_snapshot_records_record_id_idx').on(table.recordId),
+  versionIdIndex: index('dataset_snapshot_records_version_id_idx').on(table.recordVersionId),
+  ordinalCheck: check('dataset_snapshot_records_ordinal_check', sql`${table.ordinal} > 0`),
+}));
+
+export const trainingModels = trainingSchema.table('models', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  provider: text('provider'),
+  modelFamily: text('model_family'),
+  modelVersion: text('model_version'),
+  baseModel: text('base_model'),
+  configuration: jsonb('configuration').notNull().default({}),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  ...auditColumns,
+}, (table) => ({
+  creatorNameUnique: uniqueIndex('training_models_creator_name_unique').on(table.createdBy, table.name),
+  creatorTimelineIndex: index('training_models_creator_timeline_idx').on(table.createdBy, table.updatedAt),
+  activeIndex: index('training_models_active_idx').on(table.updatedAt).where(sql`${table.deletedAt} IS NULL`),
+}));
+
+export const trainingRuns = trainingSchema.table('runs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  runUid: text('run_uid').notNull(),
+  modelId: uuid('model_id').notNull().references(() => trainingModels.id),
+  modelSnapshot: jsonb('model_snapshot').notNull(),
+  datasetSnapshotId: uuid('dataset_snapshot_id').notNull().references(() => datasetSnapshots.id),
+  status: text('status').notNull().default('queued'),
+  taskType: text('task_type').notNull(),
+  transformer: jsonb('transformer').notNull(),
+  parameters: jsonb('parameters').notNull().default({}),
+  environment: jsonb('environment').notNull().default({}),
+  codeRevision: text('code_revision'),
+  seed: integer('seed'),
+  outputObjectKey: text('output_object_key'),
+  errorMessage: text('error_message'),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+}, (table) => ({
+  creatorUidUnique: uniqueIndex('training_runs_creator_uid_unique').on(table.createdBy, table.runUid),
+  creatorTimelineIndex: index('training_runs_creator_timeline_idx').on(table.createdBy, table.createdAt),
+  modelTimelineIndex: index('training_runs_model_timeline_idx').on(table.modelId, table.createdAt),
+  snapshotTimelineIndex: index('training_runs_snapshot_timeline_idx').on(table.datasetSnapshotId, table.createdAt),
+  activeQueueIndex: index('training_runs_active_queue_idx').on(table.createdAt)
+    .where(sql`${table.status} IN ('queued', 'running')`),
+  statusCheck: check('training_runs_status_check', sql`${table.status} IN ('queued', 'running', 'completed', 'failed', 'cancelled')`),
+  seedCheck: check('training_runs_seed_check', sql`${table.seed} IS NULL OR ${table.seed} >= 0`),
+  lifecycleCheck: check(
+    'training_runs_lifecycle_check',
+    sql`(${table.status} = 'queued' AND ${table.startedAt} IS NULL AND ${table.finishedAt} IS NULL)
+      OR (${table.status} = 'running' AND ${table.startedAt} IS NOT NULL AND ${table.finishedAt} IS NULL)
+      OR (${table.status} IN ('completed', 'failed') AND ${table.startedAt} IS NOT NULL AND ${table.finishedAt} IS NOT NULL)
+      OR (${table.status} = 'cancelled' AND ${table.finishedAt} IS NOT NULL)`,
+  ),
+}));
+
+export const trainingMetrics = trainingSchema.table('metrics', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  runId: uuid('run_id').notNull().references(() => trainingRuns.id, { onDelete: 'cascade' }),
+  step: integer('step').notNull().default(0),
+  epoch: doublePrecision('epoch'),
+  metricName: text('metric_name').notNull(),
+  metricValue: doublePrecision('metric_value').notNull(),
+  split: text('split').notNull().default('custom'),
+  metadata: jsonb('metadata').notNull().default({}),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  runMetricStepUnique: uniqueIndex('training_metrics_run_metric_split_step_unique')
+    .on(table.runId, table.metricName, table.split, table.step),
+  runTimelineIndex: index('training_metrics_run_timeline_idx').on(table.runId, table.recordedAt),
+  metricTimelineIndex: index('training_metrics_name_timeline_idx').on(table.metricName, table.recordedAt),
+  stepCheck: check('training_metrics_step_check', sql`${table.step} >= 0`),
+  epochCheck: check('training_metrics_epoch_check', sql`${table.epoch} IS NULL OR ${table.epoch} >= 0`),
+  valueCheck: check('training_metrics_value_check', sql`${table.metricValue} = ${table.metricValue}`),
+  splitCheck: check('training_metrics_split_check', sql`${table.split} IN ('train', 'validation', 'test', 'holdout', 'custom')`),
+}));
+
+export const memoryExperiences = memorySchema.table('experiences', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  experienceUid: text('experience_uid').notNull(),
+  sourceId: uuid('source_id').references(() => sources.id),
+  title: text('title'),
+  stateBefore: jsonb('state_before'),
+  eventSummary: jsonb('event_summary').notNull().default({}),
+  stateAfter: jsonb('state_after'),
+  reward: doublePrecision('reward').notNull().default(0),
+  predictionError: doublePrecision('prediction_error').notNull().default(0),
+  qualityScore: doublePrecision('quality_score').notNull().default(0.5),
+  curriculumLevel: text('curriculum_level').notNull().default('raw'),
+  splitName: text('split_name').notNull().default('unsplit'),
+  metadata: jsonb('metadata').notNull().default({}),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  ...auditColumns,
+}, (table) => ({
+  creatorUidUnique: uniqueIndex('memory_experiences_creator_uid_unique').on(table.createdBy, table.experienceUid),
+  activeCreatorTimelineIndex: index('memory_experiences_active_creator_timeline_idx')
+    .on(table.createdBy, table.createdAt).where(sql`${table.deletedAt} IS NULL`),
+  sourceIdIndex: index('memory_experiences_source_id_idx').on(table.sourceId),
+  qualityCheck: check('memory_experiences_quality_check', sql`${table.qualityScore} BETWEEN 0 AND 1`),
+  splitCheck: check('memory_experiences_split_check', sql`${table.splitName} IN ('unsplit', 'train', 'validation', 'test', 'holdout', 'custom')`),
+}));
+
+export const memoryEventIngestionBatches = memorySchema.table('event_ingestion_batches', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  batchUid: text('batch_uid').notNull(),
+  contentHash: text('content_hash').notNull(),
+  eventCount: integer('event_count').notNull(),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  creatorUidUnique: uniqueIndex('memory_event_batches_creator_uid_unique').on(table.createdBy, table.batchUid),
+  creatorTimelineIndex: index('memory_event_batches_creator_timeline_idx').on(table.createdBy, table.createdAt),
+  eventCountCheck: check('memory_event_batches_event_count_check', sql`${table.eventCount} BETWEEN 1 AND 500`),
+}));
+
+export const memoryEvents = memorySchema.table('events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  eventUid: text('event_uid').notNull(),
+  sourceId: uuid('source_id').references(() => sources.id),
+  experienceId: uuid('experience_id').references(() => memoryExperiences.id),
+  ingestionBatchId: uuid('ingestion_batch_id').references(() => memoryEventIngestionBatches.id),
+  batchPosition: integer('batch_position'),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }),
+  sequenceTime: doublePrecision('sequence_time'),
+  duration: doublePrecision('duration'),
+  modality: text('modality').notNull(),
+  channel: text('channel'),
+  eventType: text('event_type').notNull(),
+  symbol: text('symbol'),
+  payload: jsonb('payload').notNull().default({}),
+  stateBefore: jsonb('state_before'),
+  stateAfter: jsonb('state_after'),
+  reward: doublePrecision('reward').notNull().default(0),
+  predictionError: doublePrecision('prediction_error').notNull().default(0),
+  confidence: doublePrecision('confidence').notNull().default(1),
+  qualityScore: doublePrecision('quality_score').notNull().default(0.5),
+  proposalSource: text('proposal_source').notNull(),
+  extractorName: text('extractor_name'),
+  extractorVersion: text('extractor_version'),
+  verificationState: text('verification_state').notNull().default('unverified'),
+  sourceHash: text('source_hash'),
+  novelty: doublePrecision('novelty').notNull().default(0),
+  priorityScore: doublePrecision('priority_score').notNull().default(0),
+  metadata: jsonb('metadata').notNull().default({}),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  ...auditColumns,
+}, (table) => ({
+  creatorUidUnique: uniqueIndex('memory_events_creator_uid_unique').on(table.createdBy, table.eventUid),
+  activeCreatorTimelineIndex: index('memory_events_active_creator_timeline_idx')
+    .on(table.createdBy, table.occurredAt, table.createdAt).where(sql`${table.deletedAt} IS NULL`),
+  experienceTimelineIndex: index('memory_events_experience_timeline_idx').on(table.experienceId, table.sequenceTime),
+  ingestionBatchIndex: index('memory_events_ingestion_batch_idx').on(table.ingestionBatchId, table.createdAt),
+  ingestionBatchPositionUnique: uniqueIndex('memory_events_ingestion_batch_position_unique')
+    .on(table.ingestionBatchId, table.batchPosition).where(sql`${table.ingestionBatchId} IS NOT NULL`),
+  sourceIdIndex: index('memory_events_source_id_idx').on(table.sourceId),
+  modalityTypeIndex: index('memory_events_modality_type_idx').on(table.modality, table.eventType, table.createdAt),
+  durationCheck: check('memory_events_duration_check', sql`${table.duration} IS NULL OR ${table.duration} >= 0`),
+  confidenceCheck: check('memory_events_confidence_check', sql`${table.confidence} BETWEEN 0 AND 1`),
+  qualityCheck: check('memory_events_quality_check', sql`${table.qualityScore} BETWEEN 0 AND 1`),
+  noveltyCheck: check('memory_events_novelty_check', sql`${table.novelty} BETWEEN 0 AND 1`),
+  verificationCheck: check('memory_events_verification_check', sql`${table.verificationState} IN ('unverified', 'candidate', 'verified', 'rejected')`),
+  batchPositionCheck: check('memory_events_batch_position_check', sql`(${table.ingestionBatchId} IS NULL AND ${table.batchPosition} IS NULL) OR (${table.ingestionBatchId} IS NOT NULL AND ${table.batchPosition} > 0)`),
+}));
+
+export const memoryEntities = memorySchema.table('entities', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  entityUid: text('entity_uid').notNull(),
+  entityType: text('entity_type').notNull(),
+  canonicalName: text('canonical_name'),
+  description: text('description'),
+  properties: jsonb('properties').notNull().default({}),
+  confidence: doublePrecision('confidence').notNull().default(0.5),
+  verificationState: text('verification_state').notNull().default('unverified'),
+  proposalSource: text('proposal_source').notNull(),
+  sourceId: uuid('source_id').references(() => sources.id),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  ...auditColumns,
+}, (table) => ({
+  creatorUidUnique: uniqueIndex('memory_entities_creator_uid_unique').on(table.createdBy, table.entityUid),
+  activeCreatorTimelineIndex: index('memory_entities_active_creator_timeline_idx')
+    .on(table.createdBy, table.updatedAt).where(sql`${table.deletedAt} IS NULL`),
+  typeNameIndex: index('memory_entities_type_name_idx').on(table.entityType, table.canonicalName),
+  sourceIdIndex: index('memory_entities_source_id_idx').on(table.sourceId),
+  confidenceCheck: check('memory_entities_confidence_check', sql`${table.confidence} BETWEEN 0 AND 1`),
+  verificationCheck: check('memory_entities_verification_check', sql`${table.verificationState} IN ('unverified', 'candidate', 'verified', 'rejected')`),
+}));
+
+export const memoryEntityAliases = memorySchema.table('entity_aliases', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  entityId: uuid('entity_id').notNull().references(() => memoryEntities.id),
+  alias: text('alias').notNull(),
+  normalizedAlias: text('normalized_alias').notNull(),
+  languageCode: text('language_code').notNull().default('und'),
+  aliasType: text('alias_type').notNull().default('name'),
+  confidence: doublePrecision('confidence').notNull().default(0.5),
+  proposalSource: text('proposal_source').notNull(),
+  verificationState: text('verification_state').notNull().default('unverified'),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  ...auditColumns,
+}, (table) => ({
+  activeEntityAliasUnique: uniqueIndex('memory_entity_aliases_active_unique')
+    .on(table.entityId, table.languageCode, table.normalizedAlias).where(sql`${table.deletedAt} IS NULL`),
+  entityTimelineIndex: index('memory_entity_aliases_entity_timeline_idx').on(table.entityId, table.createdAt),
+  activeLookupIndex: index('memory_entity_aliases_active_lookup_idx')
+    .on(table.normalizedAlias, table.languageCode).where(sql`${table.deletedAt} IS NULL`),
+  createdByIndex: index('memory_entity_aliases_created_by_idx').on(table.createdBy),
+  confidenceCheck: check('memory_entity_aliases_confidence_check', sql`${table.confidence} BETWEEN 0 AND 1`),
+  verificationCheck: check('memory_entity_aliases_verification_check', sql`${table.verificationState} IN ('unverified', 'candidate', 'verified', 'rejected')`),
+}));
+
+export const memoryConcepts = memorySchema.table('concepts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  conceptUid: text('concept_uid').notNull(),
+  label: text('label'),
+  conceptType: text('concept_type').notNull(),
+  description: text('description'),
+  evidenceCount: integer('evidence_count').notNull().default(0),
+  contradictionCount: integer('contradiction_count').notNull().default(0),
+  verificationState: text('verification_state').notNull().default('unverified'),
+  proposalSource: text('proposal_source').notNull(),
+  utilityScore: doublePrecision('utility_score').notNull().default(0),
+  eventPattern: jsonb('event_pattern'),
+  payload: jsonb('payload').notNull().default({}),
+  sourceId: uuid('source_id').references(() => sources.id),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  ...auditColumns,
+}, (table) => ({
+  creatorUidUnique: uniqueIndex('memory_concepts_creator_uid_unique').on(table.createdBy, table.conceptUid),
+  activeCreatorTimelineIndex: index('memory_concepts_active_creator_timeline_idx')
+    .on(table.createdBy, table.updatedAt).where(sql`${table.deletedAt} IS NULL`),
+  typeLabelIndex: index('memory_concepts_type_label_idx').on(table.conceptType, table.label),
+  sourceIdIndex: index('memory_concepts_source_id_idx').on(table.sourceId),
+  countsCheck: check('memory_concepts_counts_check', sql`${table.evidenceCount} >= 0 AND ${table.contradictionCount} >= 0`),
+  verificationCheck: check('memory_concepts_verification_check', sql`${table.verificationState} IN ('unverified', 'candidate', 'verified', 'rejected')`),
+}));
+
+export const memoryRelations = memorySchema.table('relations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  relationUid: text('relation_uid').notNull(),
+  sourceType: text('source_type').notNull(),
+  sourceId: uuid('source_id').notNull(),
+  relationType: text('relation_type').notNull(),
+  targetType: text('target_type').notNull(),
+  targetId: uuid('target_id').notNull(),
+  strength: doublePrecision('strength').notNull().default(0.5),
+  confidence: doublePrecision('confidence').notNull().default(0.5),
+  evidenceCount: integer('evidence_count').notNull().default(0),
+  counterexampleCount: integer('counterexample_count').notNull().default(0),
+  minDelayMs: doublePrecision('min_delay_ms'),
+  maxDelayMs: doublePrecision('max_delay_ms'),
+  validFrom: timestamp('valid_from', { withTimezone: true }),
+  validUntil: timestamp('valid_until', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  verificationState: text('verification_state').notNull().default('unverified'),
+  proposalSource: text('proposal_source').notNull(),
+  context: jsonb('context').notNull().default({}),
+  payload: jsonb('payload').notNull().default({}),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  ...auditColumns,
+}, (table) => ({
+  creatorUidUnique: uniqueIndex('memory_relations_creator_uid_unique').on(table.createdBy, table.relationUid),
+  activeCreatorTimelineIndex: index('memory_relations_active_creator_timeline_idx')
+    .on(table.createdBy, table.createdAt).where(sql`${table.deletedAt} IS NULL`),
+  activeSourceIndex: index('memory_relations_active_source_idx')
+    .on(table.sourceType, table.sourceId, table.createdAt).where(sql`${table.deletedAt} IS NULL`),
+  activeTargetIndex: index('memory_relations_active_target_idx')
+    .on(table.targetType, table.targetId, table.createdAt).where(sql`${table.deletedAt} IS NULL`),
+  relationTypeIndex: index('memory_relations_type_idx').on(table.relationType, table.createdAt),
+  strengthCheck: check('memory_relations_strength_check', sql`${table.strength} BETWEEN 0 AND 1`),
+  confidenceCheck: check('memory_relations_confidence_check', sql`${table.confidence} BETWEEN 0 AND 1`),
+  countsCheck: check('memory_relations_counts_check', sql`${table.evidenceCount} >= 0 AND ${table.counterexampleCount} >= 0`),
+  nodeTypeCheck: check('memory_relations_node_type_check', sql`${table.sourceType} IN ('event', 'experience', 'entity', 'concept', 'record', 'dataset_snapshot', 'model') AND ${table.targetType} IN ('event', 'experience', 'entity', 'concept', 'record', 'dataset_snapshot', 'model')`),
+  delayCheck: check('memory_relations_delay_check', sql`(${table.minDelayMs} IS NULL OR ${table.minDelayMs} >= 0) AND (${table.maxDelayMs} IS NULL OR ${table.maxDelayMs} >= 0) AND (${table.minDelayMs} IS NULL OR ${table.maxDelayMs} IS NULL OR ${table.minDelayMs} <= ${table.maxDelayMs})`),
+  validityCheck: check('memory_relations_validity_check', sql`${table.validFrom} IS NULL OR ${table.validUntil} IS NULL OR ${table.validFrom} <= ${table.validUntil}`),
+  verificationCheck: check('memory_relations_verification_check', sql`${table.verificationState} IN ('unverified', 'candidate', 'verified', 'rejected')`),
+}));
+
+export const memoryRelationEvidence = memorySchema.table('relation_evidence', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  evidenceUid: text('evidence_uid').notNull(),
+  relationId: uuid('relation_id').notNull().references(() => memoryRelations.id, { onDelete: 'cascade' }),
+  evidenceType: text('evidence_type').notNull(),
+  referenceType: text('reference_type').notNull(),
+  referenceId: uuid('reference_id'),
+  supports: boolean('supports').notNull(),
+  weight: doublePrecision('weight').notNull().default(1),
+  details: jsonb('details').notNull().default({}),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  relationUidUnique: uniqueIndex('memory_relation_evidence_relation_uid_unique').on(table.relationId, table.evidenceUid),
+  relationTimelineIndex: index('memory_relation_evidence_relation_timeline_idx').on(table.relationId, table.createdAt),
+  referenceIndex: index('memory_relation_evidence_reference_idx').on(table.referenceType, table.referenceId),
+  createdByIndex: index('memory_relation_evidence_created_by_idx').on(table.createdBy),
+  weightCheck: check('memory_relation_evidence_weight_check', sql`${table.weight} > 0`),
+  referenceTypeCheck: check('memory_relation_evidence_reference_type_check', sql`${table.referenceType} IN ('source', 'record', 'event', 'experience', 'entity', 'concept', 'dataset_snapshot', 'model', 'external')`),
+  referencePresenceCheck: check('memory_relation_evidence_reference_presence_check', sql`(${table.referenceType} = 'external' AND ${table.referenceId} IS NULL) OR (${table.referenceType} <> 'external' AND ${table.referenceId} IS NOT NULL)`),
+}));
+
+export const memoryVerificationDecisions = memorySchema.table('verification_decisions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  targetType: text('target_type').notNull(),
+  targetId: uuid('target_id').notNull(),
+  fromState: text('from_state').notNull(),
+  toState: text('to_state').notNull(),
+  notes: text('notes'),
+  metadata: jsonb('metadata').notNull().default({}),
+  decidedBy: uuid('decided_by').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  targetTimelineIndex: index('memory_verification_target_timeline_idx').on(table.targetType, table.targetId, table.createdAt),
+  decidedByIndex: index('memory_verification_decided_by_idx').on(table.decidedBy),
+  targetTypeCheck: check('memory_verification_target_type_check', sql`${table.targetType} IN ('event', 'entity', 'entity_alias', 'concept', 'relation')`),
+  stateCheck: check('memory_verification_state_check', sql`${table.fromState} IN ('unverified', 'candidate', 'verified', 'rejected') AND ${table.toState} IN ('candidate', 'verified', 'rejected') AND ${table.fromState} <> ${table.toState}`),
 }));
 
 export const auditLogs = systemSchema.table('audit_logs', {

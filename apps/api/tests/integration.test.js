@@ -6,10 +6,22 @@ import {
   apiKeys,
   annotations,
   auditLogs,
+  datasetDefinitions,
+  datasetSnapshotRecords,
+  datasetSnapshots,
   evaluations,
   exportJobs,
   importItems,
   importJobs,
+  memoryConcepts,
+  memoryEntities,
+  memoryEntityAliases,
+  memoryEventIngestionBatches,
+  memoryEvents,
+  memoryExperiences,
+  memoryRelationEvidence,
+  memoryRelations,
+  memoryVerificationDecisions,
   recordReviews,
   recordTags,
   recordVersions,
@@ -17,6 +29,9 @@ import {
   refreshTokens,
   sources,
   tags,
+  trainingMetrics,
+  trainingModels,
+  trainingRuns,
   users,
 } from '../src/db/schema/index.js';
 import { hashSecret } from '../src/auth/secrets.js';
@@ -39,11 +54,42 @@ const createdTagIds = [];
 const createdImportJobIds = [];
 const createdExportJobIds = [];
 const createdObjectKeys = [];
+const createdDatasetDefinitionIds = [];
+const createdDatasetSnapshotIds = [];
+const createdTrainingModelIds = [];
+const createdTrainingRunIds = [];
+const createdMemoryConceptIds = [];
+const createdMemoryEntityIds = [];
+const createdMemoryEventIds = [];
+const createdMemoryBatchIds = [];
+const createdMemoryExperienceIds = [];
+const createdMemoryRelationIds = [];
+const createdMemoryAliasIds = [];
+const createdMemoryEvidenceIds = [];
+const createdMemoryDecisionIds = [];
 const rateLimitedEmails = [];
 
 async function request(path, options = {}) {
   const response = await app.request(path, options);
   return { response, body: await response.json() };
+}
+
+async function signedHeaders({ apiKey, path, body, nonce = crypto.randomUUID(), timestamp = Math.floor(Date.now() / 1000), idempotencyKey }) {
+  const encoder = new TextEncoder();
+  const bodyHashBytes = await crypto.subtle.digest('SHA-256', encoder.encode(body));
+  const bodyHash = Array.from(new Uint8Array(bodyHashBytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const canonical = ['POST', path, String(timestamp), nonce, idempotencyKey, bodyHash].join('\n');
+  const key = await crypto.subtle.importKey('raw', encoder.encode(apiKey), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signatureBytes = await crypto.subtle.sign('HMAC', key, encoder.encode(canonical));
+  const signature = Array.from(new Uint8Array(signatureBytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    'X-SARA-Timestamp': String(timestamp),
+    'X-SARA-Nonce': nonce,
+    'X-SARA-Idempotency-Key': idempotencyKey,
+    'X-SARA-Signature': `sha256=${signature}`,
+  };
 }
 
 afterAll(async () => {
@@ -60,6 +106,47 @@ afterAll(async () => {
   }
   if (createdExportJobIds.length > 0) {
     await db.delete(exportJobs).where(inArray(exportJobs.id, createdExportJobIds));
+  }
+  if (createdMemoryRelationIds.length > 0) {
+    if (createdMemoryEvidenceIds.length > 0) {
+      await db.delete(memoryRelationEvidence).where(inArray(memoryRelationEvidence.id, createdMemoryEvidenceIds));
+    }
+    await db.delete(memoryRelations).where(inArray(memoryRelations.id, createdMemoryRelationIds));
+  }
+  if (createdMemoryDecisionIds.length > 0) {
+    await db.delete(memoryVerificationDecisions).where(inArray(memoryVerificationDecisions.id, createdMemoryDecisionIds));
+  }
+  if (createdMemoryEventIds.length > 0) {
+    await db.delete(memoryEvents).where(inArray(memoryEvents.id, createdMemoryEventIds));
+  }
+  if (createdMemoryBatchIds.length > 0) {
+    await db.delete(memoryEventIngestionBatches).where(inArray(memoryEventIngestionBatches.id, createdMemoryBatchIds));
+  }
+  if (createdMemoryConceptIds.length > 0) {
+    await db.delete(memoryConcepts).where(inArray(memoryConcepts.id, createdMemoryConceptIds));
+  }
+  if (createdMemoryEntityIds.length > 0) {
+    if (createdMemoryAliasIds.length > 0) {
+      await db.delete(memoryEntityAliases).where(inArray(memoryEntityAliases.id, createdMemoryAliasIds));
+    }
+    await db.delete(memoryEntities).where(inArray(memoryEntities.id, createdMemoryEntityIds));
+  }
+  if (createdMemoryExperienceIds.length > 0) {
+    await db.delete(memoryExperiences).where(inArray(memoryExperiences.id, createdMemoryExperienceIds));
+  }
+  if (createdTrainingRunIds.length > 0) {
+    await db.delete(trainingMetrics).where(inArray(trainingMetrics.runId, createdTrainingRunIds));
+    await db.delete(trainingRuns).where(inArray(trainingRuns.id, createdTrainingRunIds));
+  }
+  if (createdTrainingModelIds.length > 0) {
+    await db.delete(trainingModels).where(inArray(trainingModels.id, createdTrainingModelIds));
+  }
+  if (createdDatasetSnapshotIds.length > 0) {
+    await db.delete(datasetSnapshotRecords).where(inArray(datasetSnapshotRecords.snapshotId, createdDatasetSnapshotIds));
+    await db.delete(datasetSnapshots).where(inArray(datasetSnapshots.id, createdDatasetSnapshotIds));
+  }
+  if (createdDatasetDefinitionIds.length > 0) {
+    await db.delete(datasetDefinitions).where(inArray(datasetDefinitions.id, createdDatasetDefinitionIds));
   }
   if (createdObjectKeys.length > 0) {
     const objectStore = new Bun.S3Client({
@@ -103,7 +190,7 @@ afterAll(async () => {
   await closeDatabase();
 });
 
-integrationTest('validates auth, provenance, review, audit, import/export, concurrency, and refresh rotation', async () => {
+integrationTest('validates auth, provenance, review, audit, import/export, datasets, training, memory, concurrency, and refresh rotation', async () => {
   const login = await request('/api/v1/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -239,6 +326,12 @@ integrationTest('validates auth, provenance, review, audit, import/export, concu
     body: JSON.stringify({ format: 'json', content: '[]', idempotency_key: `denied-${crypto.randomUUID()}` }),
   });
   expect(apiKeyImport.response.status).toBe(403);
+  const apiKeyDataset = await request('/api/v1/datasets', { headers: apiKeyHeaders });
+  expect(apiKeyDataset.response.status).toBe(403);
+  const apiKeyTraining = await request('/api/v1/training/models', { headers: apiKeyHeaders });
+  expect(apiKeyTraining.response.status).toBe(403);
+  const apiKeyMemory = await request('/api/v1/memory/events', { headers: apiKeyHeaders });
+  expect(apiKeyMemory.response.status).toBe(403);
 
   const sourceWriterKey = await request('/api/v1/auth/api-keys', {
     method: 'POST',
@@ -641,6 +734,558 @@ integrationTest('validates auth, provenance, review, audit, import/export, concu
   const completedCancel = await request(`/api/v1/exports/${asyncExport.body.data.id}/cancel`, { method: 'POST', headers });
   expect(completedCancel.response.status).toBe(409);
   expect(completedCancel.body.error.code).toBe('JOB_NOT_CANCELLABLE');
+
+  const datasetDefinition = await request('/api/v1/datasets', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      name: `Async training dataset ${crypto.randomUUID()}`,
+      description: 'Immutable integration snapshot',
+      filters: { statuses: ['draft'], record_types: ['plain_text'], language_codes: [asyncLanguage] },
+      manifest_format: 'jsonl',
+    }),
+  });
+  expect(datasetDefinition.response.status).toBe(201);
+  createdDatasetDefinitionIds.push(datasetDefinition.body.data.id);
+  const duplicateDataset = await request('/api/v1/datasets', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      name: datasetDefinition.body.data.name,
+      filters: { language_codes: [asyncLanguage] },
+      manifest_format: 'jsonl',
+    }),
+  });
+  expect(duplicateDataset.response.status).toBe(409);
+
+  const datasetSnapshot = await request(`/api/v1/datasets/${datasetDefinition.body.data.id}/snapshots`, {
+    method: 'POST', headers, body: '{}',
+  });
+  expect(datasetSnapshot.response.status).toBe(201);
+  expect(datasetSnapshot.body.data.status).toBe('completed');
+  expect(datasetSnapshot.body.data.record_count).toBe(3);
+  expect(datasetSnapshot.body.data.manifest_hash).toStartWith('sha256:');
+  createdDatasetSnapshotIds.push(datasetSnapshot.body.data.id);
+  createdObjectKeys.push(datasetSnapshot.body.data.manifest_object_key);
+
+  const snapshotDetailBeforeUpdate = await request(
+    `/api/v1/datasets/${datasetDefinition.body.data.id}/snapshots/${datasetSnapshot.body.data.id}`,
+    { headers },
+  );
+  expect(snapshotDetailBeforeUpdate.response.status).toBe(200);
+  expect(snapshotDetailBeforeUpdate.body.data.records).toHaveLength(3);
+  const frozenMember = snapshotDetailBeforeUpdate.body.data.records[0];
+  const updatedAfterSnapshot = await request(`/api/v1/records/${frozenMember.record_id}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ expected_version: 1, title: 'Updated after immutable snapshot' }),
+  });
+  expect(updatedAfterSnapshot.response.status).toBe(200);
+  expect(updatedAfterSnapshot.body.data.current_version_id).not.toBe(frozenMember.record_version_id);
+  const snapshotDetailAfterUpdate = await request(
+    `/api/v1/datasets/${datasetDefinition.body.data.id}/snapshots/${datasetSnapshot.body.data.id}`,
+    { headers },
+  );
+  expect(snapshotDetailAfterUpdate.body.data.records[0].record_version_id).toBe(frozenMember.record_version_id);
+
+  const manifestResponse = await app.request(
+    `/api/v1/datasets/${datasetDefinition.body.data.id}/snapshots/${datasetSnapshot.body.data.id}/manifest`,
+    { headers },
+  );
+  expect(manifestResponse.status).toBe(200);
+  expect(manifestResponse.headers.get('X-Content-SHA256')).toBe(datasetSnapshot.body.data.manifest_hash);
+  const manifestText = await manifestResponse.text();
+  expect(manifestText).toContain(frozenMember.record_version_id);
+  expect(manifestText).not.toContain(updatedAfterSnapshot.body.data.current_version_id);
+
+  const trainingModel = await request('/api/v1/training/models', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      name: `Integration model ${crypto.randomUUID()}`,
+      provider: 'local', model_family: 'test-family', model_version: '1.0',
+      base_model: 'base/test', configuration: { precision: 'bf16' },
+    }),
+  });
+  expect(trainingModel.response.status).toBe(201);
+  createdTrainingModelIds.push(trainingModel.body.data.id);
+  const duplicateModel = await request('/api/v1/training/models', {
+    method: 'POST', headers,
+    body: JSON.stringify({ name: trainingModel.body.data.name }),
+  });
+  expect(duplicateModel.response.status).toBe(409);
+
+  const invalidSnapshotRun = await request('/api/v1/training/runs', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      run_uid: `invalid-${crypto.randomUUID()}`, model_id: trainingModel.body.data.id,
+      dataset_snapshot_id: crypto.randomUUID(), task_type: 'sft',
+      transformer: { name: 'chatml', version: '1.0' },
+    }),
+  });
+  expect(invalidSnapshotRun.response.status).toBe(409);
+  expect(invalidSnapshotRun.body.error.code).toBe('SNAPSHOT_NOT_READY');
+
+  const trainingRun = await request('/api/v1/training/runs', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      run_uid: `run-${crypto.randomUUID()}`, model_id: trainingModel.body.data.id,
+      dataset_snapshot_id: datasetSnapshot.body.data.id, task_type: 'sft',
+      transformer: { name: 'chatml', version: '1.0', configuration: { include_system: true } },
+      parameters: { epochs: 2, learning_rate: 0.00002 },
+      environment: { runtime: 'integration' }, code_revision: 'test-revision', seed: 42,
+    }),
+  });
+  expect(trainingRun.response.status).toBe(201);
+  expect(trainingRun.body.data.status).toBe('queued');
+  expect(trainingRun.body.data.dataset_snapshot_id).toBe(datasetSnapshot.body.data.id);
+  expect(trainingRun.body.data.model_snapshot.model_version).toBe('1.0');
+  createdTrainingRunIds.push(trainingRun.body.data.id);
+
+  const updatedTrainingModel = await request(`/api/v1/training/models/${trainingModel.body.data.id}`, {
+    method: 'PATCH', headers, body: JSON.stringify({ model_version: '2.0' }),
+  });
+  expect(updatedTrainingModel.response.status).toBe(200);
+  expect(updatedTrainingModel.body.data.model_version).toBe('2.0');
+
+  const queuedMetric = await request(`/api/v1/training/runs/${trainingRun.body.data.id}/metrics`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ metric_name: 'loss', metric_value: 1.5, split: 'train', step: 1 }),
+  });
+  expect(queuedMetric.response.status).toBe(409);
+
+  const runningRun = await request(`/api/v1/training/runs/${trainingRun.body.data.id}/status`, {
+    method: 'POST', headers, body: JSON.stringify({ status: 'running' }),
+  });
+  expect(runningRun.response.status).toBe(200);
+  expect(runningRun.body.data.status).toBe('running');
+  expect(runningRun.body.data.started_at).not.toBeNull();
+
+  const lossMetric = await request(`/api/v1/training/runs/${trainingRun.body.data.id}/metrics`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ metric_name: 'loss', metric_value: 0.42, split: 'train', step: 1, epoch: 0.5 }),
+  });
+  expect(lossMetric.response.status).toBe(201);
+  const duplicateMetric = await request(`/api/v1/training/runs/${trainingRun.body.data.id}/metrics`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ metric_name: 'loss', metric_value: 0.41, split: 'train', step: 1 }),
+  });
+  expect(duplicateMetric.response.status).toBe(409);
+
+  const completedRun = await request(`/api/v1/training/runs/${trainingRun.body.data.id}/status`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ status: 'completed', output_object_key: 'training/integration/checkpoint' }),
+  });
+  expect(completedRun.response.status).toBe(200);
+  expect(completedRun.body.data.status).toBe('completed');
+  expect(completedRun.body.data.finished_at).not.toBeNull();
+  const repeatedCompletion = await request(`/api/v1/training/runs/${trainingRun.body.data.id}/status`, {
+    method: 'POST', headers, body: JSON.stringify({ status: 'completed' }),
+  });
+  expect(repeatedCompletion.response.status).toBe(409);
+
+  const evaluationMetric = await request(`/api/v1/training/runs/${trainingRun.body.data.id}/metrics`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ metric_name: 'accuracy', metric_value: 0.91, split: 'validation', step: 2 }),
+  });
+  expect(evaluationMetric.response.status).toBe(201);
+  const trainingRunDetail = await request(`/api/v1/training/runs/${trainingRun.body.data.id}`, { headers });
+  expect(trainingRunDetail.response.status).toBe(200);
+  expect(trainingRunDetail.body.data.dataset_snapshot_id).toBe(datasetSnapshot.body.data.id);
+  expect(trainingRunDetail.body.data.model_snapshot.model_version).toBe('1.0');
+  expect(trainingRunDetail.body.data.transformer.version).toBe('1.0');
+  expect(trainingRunDetail.body.data.metrics).toHaveLength(2);
+
+  const experience = await request('/api/v1/memory/experiences', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      experience_uid: `experience-${crypto.randomUUID()}`, source_id: sourceId,
+      title: 'Bell and meal observation', state_before: { hungry: true },
+      event_summary: { event_count: 1 }, state_after: { food_available: true },
+      reward: 0.2, prediction_error: 0.8, quality_score: 0.9,
+      curriculum_level: 'observation', metadata: { session: 'integration' },
+    }),
+  });
+  expect(experience.response.status).toBe(201);
+  expect(experience.body.data.source_id).toBe(sourceId);
+  createdMemoryExperienceIds.push(experience.body.data.id);
+
+  const eventUid = `event-${crypto.randomUUID()}`;
+  const memoryEvent = await request('/api/v1/memory/events', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      event_uid: eventUid, source_id: sourceId, experience_id: experience.body.data.id,
+      occurred_at: '2026-08-31T12:00:00+09:00', sequence_time: 0, duration: 0.5,
+      modality: 'audio', channel: 'microphone', event_type: 'observation', symbol: 'bell',
+      payload: { amplitude: 0.7 }, reward: 0.2, prediction_error: 0.8,
+      confidence: 0.7, quality_score: 0.8, proposal_source: 'llm',
+      extractor_name: 'integration-extractor', extractor_version: '1.0',
+      verification_state: 'candidate', novelty: 0.6,
+    }),
+  });
+  expect(memoryEvent.response.status).toBe(201);
+  expect(memoryEvent.body.data.verification_state).toBe('candidate');
+  createdMemoryEventIds.push(memoryEvent.body.data.id);
+  const duplicateEvent = await request('/api/v1/memory/events', {
+    method: 'POST', headers,
+    body: JSON.stringify({ event_uid: eventUid, modality: 'audio', event_type: 'observation', proposal_source: 'human' }),
+  });
+  expect(duplicateEvent.response.status).toBe(409);
+
+  const batchUid = `batch-${crypto.randomUUID()}`;
+  const bulkEvents = [1, 2, 3].map((position) => ({
+    event_uid: `bulk-event-${crypto.randomUUID()}`,
+    source_id: sourceId,
+    experience_id: experience.body.data.id,
+    occurred_at: `2026-08-31T12:00:0${position}+09:00`,
+    sequence_time: position,
+    modality: position === 1 ? 'audio' : 'state',
+    event_type: 'observation',
+    symbol: position === 1 ? 'bell' : `state-${position}`,
+    payload: { position },
+    confidence: 0.7,
+    proposal_source: 'rule',
+    verification_state: 'candidate',
+  }));
+  const bulkEventCreate = await request('/api/v1/memory/events/bulk', {
+    method: 'POST', headers, body: JSON.stringify({ batch_uid: batchUid, events: bulkEvents }),
+  });
+  expect(bulkEventCreate.response.status).toBe(201);
+  expect(bulkEventCreate.body.data.replayed).toBe(false);
+  expect(bulkEventCreate.body.data.event_count).toBe(3);
+  expect(bulkEventCreate.body.data.events.map((event) => event.batch_position)).toEqual([1, 2, 3]);
+  createdMemoryBatchIds.push(bulkEventCreate.body.data.batch_id);
+  createdMemoryEventIds.push(...bulkEventCreate.body.data.events.map((event) => event.id));
+
+  const bulkEventReplay = await request('/api/v1/memory/events/bulk', {
+    method: 'POST', headers, body: JSON.stringify({ batch_uid: batchUid, events: bulkEvents }),
+  });
+  expect(bulkEventReplay.response.status).toBe(200);
+  expect(bulkEventReplay.body.data.replayed).toBe(true);
+  expect(bulkEventReplay.body.data.events.map((event) => event.id))
+    .toEqual(bulkEventCreate.body.data.events.map((event) => event.id));
+
+  const changedBatch = await request('/api/v1/memory/events/bulk', {
+    method: 'POST', headers,
+    body: JSON.stringify({ batch_uid: batchUid, events: [{ ...bulkEvents[0], symbol: 'changed' }] }),
+  });
+  expect(changedBatch.response.status).toBe(409);
+  expect(changedBatch.body.error.code).toBe('BATCH_UID_CONFLICT');
+
+  const duplicateBulkUid = await request('/api/v1/memory/events/bulk', {
+    method: 'POST', headers,
+    body: JSON.stringify({ batch_uid: `duplicate-${crypto.randomUUID()}`, events: [bulkEvents[0], bulkEvents[0]] }),
+  });
+  expect(duplicateBulkUid.response.status).toBe(400);
+  expect(duplicateBulkUid.body.error.code).toBe('DUPLICATE_EVENT_UID');
+
+  const rolledBackBatchUid = `rollback-${crypto.randomUUID()}`;
+  const conflictingBulk = await request('/api/v1/memory/events/bulk', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      batch_uid: rolledBackBatchUid,
+      events: [{ ...bulkEvents[0], event_uid: eventUid }],
+    }),
+  });
+  expect(conflictingBulk.response.status).toBe(409);
+  expect(conflictingBulk.body.error.code).toBe('EVENT_UID_CONFLICT');
+  const rolledBackBatches = await db.select({ id: memoryEventIngestionBatches.id })
+    .from(memoryEventIngestionBatches)
+    .where(and(
+      eq(memoryEventIngestionBatches.createdBy, login.body.data.user.id),
+      eq(memoryEventIngestionBatches.batchUid, rolledBackBatchUid),
+    ));
+  expect(rolledBackBatches).toHaveLength(0);
+
+  const memoryWriterKey = await request('/api/v1/auth/api-keys', {
+    method: 'POST', headers,
+    body: JSON.stringify({ name: 'Signed SARA event writer', scopes: ['memory:write'] }),
+  });
+  expect(memoryWriterKey.response.status).toBe(201);
+  createdApiKeyIds.push(memoryWriterKey.body.data.id);
+  const signedPath = '/api/v1/memory/events/bulk';
+  const signedBatchUid = `signed-${crypto.randomUUID()}`;
+  const signedBody = JSON.stringify({
+    batch_uid: signedBatchUid,
+    events: [{
+      event_uid: `signed-event-${crypto.randomUUID()}`,
+      source_id: sourceId,
+      experience_id: experience.body.data.id,
+      occurred_at: '2026-08-31T12:01:00+09:00',
+      modality: 'state', event_type: 'observation', symbol: 'signed-ingress',
+      proposal_source: 'rule', verification_state: 'candidate',
+    }],
+  });
+
+  const unsignedIngress = await request(signedPath, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${memoryWriterKey.body.data.key}`, 'Content-Type': 'application/json' },
+    body: signedBody,
+  });
+  expect(unsignedIngress.response.status).toBe(401);
+  expect(unsignedIngress.body.error.code).toBe('HMAC_REQUIRED');
+
+  const signedRequestHeaders = await signedHeaders({
+    apiKey: memoryWriterKey.body.data.key, path: signedPath, body: signedBody, idempotencyKey: signedBatchUid,
+  });
+  const signedIngress = await request(signedPath, { method: 'POST', headers: signedRequestHeaders, body: signedBody });
+  expect(signedIngress.response.status).toBe(201);
+  expect(signedIngress.body.data.replayed).toBe(false);
+  createdMemoryBatchIds.push(signedIngress.body.data.batch_id);
+  createdMemoryEventIds.push(...signedIngress.body.data.events.map((event) => event.id));
+
+  const nonceReplay = await request(signedPath, { method: 'POST', headers: signedRequestHeaders, body: signedBody });
+  expect(nonceReplay.response.status).toBe(409);
+  expect(nonceReplay.body.error.code).toBe('HMAC_NONCE_REPLAY');
+
+  const retryHeaders = await signedHeaders({
+    apiKey: memoryWriterKey.body.data.key, path: signedPath, body: signedBody,
+    nonce: crypto.randomUUID(), idempotencyKey: signedBatchUid,
+  });
+  const idempotentRetry = await request(signedPath, { method: 'POST', headers: retryHeaders, body: signedBody });
+  expect(idempotentRetry.response.status).toBe(200);
+  expect(idempotentRetry.body.data.replayed).toBe(true);
+  expect(idempotentRetry.body.data.events[0].id).toBe(signedIngress.body.data.events[0].id);
+
+  const expiredHeaders = await signedHeaders({
+    apiKey: memoryWriterKey.body.data.key, path: signedPath, body: signedBody,
+    nonce: crypto.randomUUID(), timestamp: Math.floor(Date.now() / 1000) - 3600, idempotencyKey: signedBatchUid,
+  });
+  const expiredSignature = await request(signedPath, { method: 'POST', headers: expiredHeaders, body: signedBody });
+  expect(expiredSignature.response.status).toBe(401);
+  expect(expiredSignature.body.error.code).toBe('HMAC_TIMESTAMP_EXPIRED');
+
+  const tamperedHeaders = await signedHeaders({
+    apiKey: memoryWriterKey.body.data.key, path: signedPath, body: signedBody,
+    nonce: crypto.randomUUID(), idempotencyKey: signedBatchUid,
+  });
+  const tamperedSignature = await request(signedPath, {
+    method: 'POST', headers: tamperedHeaders,
+    body: signedBody.replace('signed-ingress', 'tampered-ingress'),
+  });
+  expect(tamperedSignature.response.status).toBe(401);
+  expect(tamperedSignature.body.error.code).toBe('HMAC_SIGNATURE_INVALID');
+
+  const invalidSourceEntity = await request('/api/v1/memory/entities', {
+    method: 'POST', headers,
+    body: JSON.stringify({ entity_uid: `invalid-${crypto.randomUUID()}`, entity_type: 'object', proposal_source: 'human', source_id: crypto.randomUUID() }),
+  });
+  expect(invalidSourceEntity.response.status).toBe(404);
+  expect(invalidSourceEntity.body.error.code).toBe('SOURCE_NOT_FOUND');
+
+  const entity = await request('/api/v1/memory/entities', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      entity_uid: `entity-${crypto.randomUUID()}`, entity_type: 'object', canonical_name: 'bell',
+      properties: { material: 'metal' }, confidence: 0.95,
+      verification_state: 'candidate', proposal_source: 'human', source_id: sourceId,
+    }),
+  });
+  expect(entity.response.status).toBe(201);
+  createdMemoryEntityIds.push(entity.body.data.id);
+
+  const entityAlias = await request(`/api/v1/memory/entities/${entity.body.data.id}/aliases`, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      alias: 'Ｂｅｌｌ', language_code: 'en', alias_type: 'name', confidence: 0.9,
+      proposal_source: 'human', verification_state: 'candidate',
+    }),
+  });
+  expect(entityAlias.response.status).toBe(201);
+  expect(entityAlias.body.data.normalized_alias).toBe('bell');
+  createdMemoryAliasIds.push(entityAlias.body.data.id);
+  const duplicateAlias = await request(`/api/v1/memory/entities/${entity.body.data.id}/aliases`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ alias: ' bell ', language_code: 'EN', proposal_source: 'human' }),
+  });
+  expect(duplicateAlias.response.status).toBe(409);
+
+  const concept = await request('/api/v1/memory/concepts', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      concept_uid: `concept-${crypto.randomUUID()}`, concept_type: 'prediction', label: 'bell predicts meal',
+      evidence_count: 1, contradiction_count: 0, verification_state: 'candidate',
+      proposal_source: 'rule', utility_score: 0.4, event_pattern: { sequence: ['bell', 'meal'] },
+      source_id: sourceId,
+    }),
+  });
+  expect(concept.response.status).toBe(201);
+  createdMemoryConceptIds.push(concept.body.data.id);
+
+  const invalidRelation = await request('/api/v1/memory/relations', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      relation_uid: `invalid-relation-${crypto.randomUUID()}`,
+      source_type: 'entity', source_id: entity.body.data.id, relation_type: 'predicts',
+      target_type: 'concept', target_id: crypto.randomUUID(), proposal_source: 'rule',
+    }),
+  });
+  expect(invalidRelation.response.status).toBe(404);
+  expect(invalidRelation.body.error.code).toBe('TARGET_NODE_NOT_FOUND');
+
+  const relation = await request('/api/v1/memory/relations', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      relation_uid: `relation-${crypto.randomUUID()}`,
+      source_type: 'entity', source_id: entity.body.data.id, relation_type: 'associated_with',
+      target_type: 'concept', target_id: concept.body.data.id,
+      strength: 0.75, confidence: 0.65, evidence_count: 1,
+      min_delay_ms: 100, max_delay_ms: 2000, verification_state: 'candidate',
+      proposal_source: 'rule', context: { environment: 'lab' },
+    }),
+  });
+  expect(relation.response.status).toBe(201);
+  expect(relation.body.data.source_id).toBe(entity.body.data.id);
+  createdMemoryRelationIds.push(relation.body.data.id);
+
+  const predictionRelation = await request('/api/v1/memory/relations', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      relation_uid: `relation-${crypto.randomUUID()}`,
+      source_type: 'concept', source_id: concept.body.data.id, relation_type: 'predicts',
+      target_type: 'event', target_id: bulkEventCreate.body.data.events[0].id,
+      strength: 0.7, confidence: 0.8, verification_state: 'candidate',
+      proposal_source: 'rule', context: { environment: 'lab' },
+    }),
+  });
+  expect(predictionRelation.response.status).toBe(201);
+  createdMemoryRelationIds.push(predictionRelation.body.data.id);
+
+  const traversal = await request('/api/v1/memory/traverse', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      start_nodes: [{ type: 'entity', id: entity.body.data.id }],
+      relation_types: ['associated_with', 'predicts'], direction: 'outgoing',
+      max_depth: 2, max_nodes: 10, max_edges: 10,
+    }),
+  });
+  expect(traversal.response.status).toBe(200);
+  expect(traversal.body.data.nodes).toHaveLength(3);
+  expect(traversal.body.data.relations).toHaveLength(2);
+  expect(traversal.body.meta.depth_reached).toBe(2);
+
+  const shallowTraversal = await request('/api/v1/memory/traverse', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      start_nodes: [{ type: 'entity', id: entity.body.data.id }],
+      direction: 'outgoing', max_depth: 1, max_nodes: 10, max_edges: 10,
+    }),
+  });
+  expect(shallowTraversal.response.status).toBe(200);
+  expect(shallowTraversal.body.data.nodes).toHaveLength(2);
+  expect(shallowTraversal.body.data.relations).toHaveLength(1);
+
+  const filteredTraversal = await request('/api/v1/memory/traverse', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      start_nodes: [{ type: 'entity', id: entity.body.data.id }],
+      relation_types: ['not_present'], max_depth: 2, max_nodes: 10, max_edges: 10,
+    }),
+  });
+  expect(filteredTraversal.response.status).toBe(200);
+  expect(filteredTraversal.body.data.nodes).toHaveLength(1);
+  expect(filteredTraversal.body.data.relations).toHaveLength(0);
+
+  const nodeLimitedTraversal = await request('/api/v1/memory/traverse', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      start_nodes: [{ type: 'entity', id: entity.body.data.id }],
+      max_depth: 2, max_nodes: 1, max_edges: 10,
+    }),
+  });
+  expect(nodeLimitedTraversal.response.status).toBe(200);
+  expect(nodeLimitedTraversal.body.data.nodes).toHaveLength(1);
+  expect(nodeLimitedTraversal.body.meta.node_limit_reached).toBe(true);
+
+  const invalidTraversalLimits = await request('/api/v1/memory/traverse', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      start_nodes: [
+        { type: 'entity', id: entity.body.data.id },
+        { type: 'concept', id: concept.body.data.id },
+      ],
+      max_nodes: 1,
+    }),
+  });
+  expect(invalidTraversalLimits.response.status).toBe(400);
+
+  const supportingEvidence = await request(`/api/v1/memory/relations/${relation.body.data.id}/evidence`, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      evidence_uid: `evidence-${crypto.randomUUID()}`, evidence_type: 'observation',
+      reference_type: 'event', reference_id: memoryEvent.body.data.id,
+      supports: true, weight: 1.2, details: { note: 'Bell observation supports association' },
+    }),
+  });
+  expect(supportingEvidence.response.status).toBe(201);
+  expect(supportingEvidence.body.data.relation.evidence_count).toBe(2);
+  createdMemoryEvidenceIds.push(supportingEvidence.body.data.evidence.id);
+  const duplicateEvidence = await request(`/api/v1/memory/relations/${relation.body.data.id}/evidence`, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      evidence_uid: supportingEvidence.body.data.evidence.evidence_uid,
+      evidence_type: 'observation', reference_type: 'event', reference_id: memoryEvent.body.data.id,
+      supports: true,
+    }),
+  });
+  expect(duplicateEvidence.response.status).toBe(409);
+  const counterEvidence = await request(`/api/v1/memory/relations/${relation.body.data.id}/evidence`, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      evidence_uid: `counter-${crypto.randomUUID()}`, evidence_type: 'external_report',
+      reference_type: 'external', supports: false, weight: 0.5,
+      details: { url: 'https://example.invalid/counterexample' },
+    }),
+  });
+  expect(counterEvidence.response.status).toBe(201);
+  expect(counterEvidence.body.data.relation.evidence_count).toBe(2);
+  expect(counterEvidence.body.data.relation.counterexample_count).toBe(1);
+  createdMemoryEvidenceIds.push(counterEvidence.body.data.evidence.id);
+  const evidenceList = await request(`/api/v1/memory/relations/${relation.body.data.id}/evidence`, { headers });
+  expect(evidenceList.response.status).toBe(200);
+  expect(evidenceList.body.data).toHaveLength(2);
+
+  const neighbors = await request(`/api/v1/memory/nodes/entity/${entity.body.data.id}/neighbors`, { headers });
+  expect(neighbors.response.status).toBe(200);
+  expect(neighbors.body.data).toHaveLength(1);
+  expect(neighbors.body.data[0].target_id).toBe(concept.body.data.id);
+
+  const directVerificationPatch = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ verification_state: 'verified', evidence_count: 2 }),
+  });
+  expect(directVerificationPatch.response.status).toBe(400);
+  const updatedConceptEvidence = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, {
+    method: 'PATCH', headers, body: JSON.stringify({ evidence_count: 2 }),
+  });
+  expect(updatedConceptEvidence.response.status).toBe(200);
+  expect(updatedConceptEvidence.body.data.event_pattern.sequence).toEqual(['bell', 'meal']);
+
+  const verifiedConcept = await request(`/api/v1/memory/verification/concept/${concept.body.data.id}`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ expected_state: 'candidate', state: 'verified', notes: 'Confirmed by integration reviewer' }),
+  });
+  expect(verifiedConcept.response.status).toBe(200);
+  expect(verifiedConcept.body.data.verification_state).toBe('verified');
+  createdMemoryDecisionIds.push(verifiedConcept.body.data.decision.id);
+  const repeatedVerification = await request(`/api/v1/memory/verification/concept/${concept.body.data.id}`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ expected_state: 'candidate', state: 'rejected' }),
+  });
+  expect(repeatedVerification.response.status).toBe(409);
+  const verificationHistory = await request(`/api/v1/memory/verification/concept/${concept.body.data.id}`, { headers });
+  expect(verificationHistory.response.status).toBe(200);
+  expect(verificationHistory.body.data).toHaveLength(1);
+  expect(verificationHistory.body.data[0].to_state).toBe('verified');
+
+  const viewerMemoryRead = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, { headers: viewerHeaders });
+  expect(viewerMemoryRead.response.status).toBe(404);
+
+  const referencedConceptDelete = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, { method: 'DELETE', headers });
+  expect(referencedConceptDelete.response.status).toBe(409);
+  expect(referencedConceptDelete.body.error.code).toBe('MEMORY_NODE_IN_USE');
+
+  const deletedEvent = await request(`/api/v1/memory/events/${memoryEvent.body.data.id}`, { method: 'DELETE', headers });
+  expect(deletedEvent.response.status).toBe(200);
+  expect(deletedEvent.body.data.deleted_at).not.toBeNull();
+  const deletedEventRead = await request(`/api/v1/memory/events/${memoryEvent.body.data.id}`, { headers });
+  expect(deletedEventRead.response.status).toBe(404);
 
   const sourceAudits = await request(
     `/api/v1/audit-logs?resource_type=source&resource_id=${sourceId}&limit=20`,

@@ -1,0 +1,3 @@
+ALTER TABLE "memory"."events" ADD COLUMN "batch_position" integer;--> statement-breakpoint
+CREATE UNIQUE INDEX "memory_events_ingestion_batch_position_unique" ON "memory"."events" USING btree ("ingestion_batch_id","batch_position") WHERE "memory"."events"."ingestion_batch_id" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "memory"."events" ADD CONSTRAINT "memory_events_batch_position_check" CHECK (("memory"."events"."ingestion_batch_id" IS NULL AND "memory"."events"."batch_position" IS NULL) OR ("memory"."events"."ingestion_batch_id" IS NOT NULL AND "memory"."events"."batch_position" > 0));

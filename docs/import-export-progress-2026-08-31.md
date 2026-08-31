@@ -18,4 +18,8 @@
 - [Done] chunk進捗、取消要求、stale processing再queue
 - [Done] Import Itemからの再開位置・件数復元
 - [Done] 非同期Export成果物downloadとchecksum
-- [Next] Dataset Definition・Snapshot・manifest生成
+- [Done] Dataset Definition・不変Snapshot・manifest生成
+- [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
+- [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
+- [Done] Relation Evidence・Entity Alias・候補検証フロー
+- [Next] Bulk Event ingestion・bounded graph traversal

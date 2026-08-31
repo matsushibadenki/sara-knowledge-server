@@ -827,50 +827,59 @@ warning
 unknown
 ```
 
-## 7.11 dataset.datasets
+## 7.11 dataset.dataset_definitions（実装済み）
 
 ```text
 id UUID PRIMARY KEY
 name TEXT NOT NULL
 description TEXT
-status TEXT NOT NULL
-schema_definition JSONB
-default_split_strategy JSONB
-created_by UUID
+filters JSONB NOT NULL
+manifest_format TEXT NOT NULL
+created_by UUID NOT NULL
 created_at TIMESTAMPTZ NOT NULL
 updated_at TIMESTAMPTZ NOT NULL
 deleted_at TIMESTAMPTZ
 ```
 
-## 7.12 dataset.dataset_members
+Definitionは再利用可能な抽出条件であり、変更可能とする。作成者内でnameを一意にする。
+
+## 7.12 dataset.dataset_snapshots（実装済み）
 
 ```text
-dataset_id UUID REFERENCES dataset.datasets
-record_id UUID REFERENCES dataset.records
-record_version_id UUID
-split_name TEXT NOT NULL
-weight DOUBLE PRECISION NOT NULL DEFAULT 1
-position BIGINT
-metadata JSONB NOT NULL DEFAULT '{}'
+id UUID PRIMARY KEY
+definition_id UUID REFERENCES dataset.dataset_definitions
+status TEXT NOT NULL
+definition_revision TIMESTAMPTZ NOT NULL
+filters JSONB NOT NULL
+manifest_format TEXT NOT NULL
+record_count INTEGER NOT NULL
+manifest_object_key TEXT
+manifest_hash TEXT
+error_message TEXT
+created_by UUID NOT NULL
 created_at TIMESTAMPTZ NOT NULL
-PRIMARY KEY(dataset_id, record_id)
+completed_at TIMESTAMPTZ
 ```
 
-`split_name`:
+## 7.13 dataset.dataset_snapshot_records（実装済み）
 
 ```text
-train
-validation
-test
-holdout
-custom
+snapshot_id UUID REFERENCES dataset.dataset_snapshots
+record_id UUID REFERENCES dataset.records
+record_version_id UUID REFERENCES dataset.record_versions
+ordinal INTEGER NOT NULL
+created_at TIMESTAMPTZ NOT NULL
+PRIMARY KEY(snapshot_id, record_id)
+UNIQUE(snapshot_id, ordinal)
 ```
+
+Definitionは変更可能だがSnapshotは変更しない。SnapshotはDefinition revision、filter、順序付きRecord Versionを固定する。member選択と固定は同一の短いトランザクション、manifestのMinIO保存はトランザクション外で行う。同期buildは10,000 Recordまでとする。
 
 ---
 
 # 8. memoryスキーマ
 
-## 8.1 memory.events
+## 8.1 memory.events（最小版実装済み）
 
 既存`wp_sara_events`を拡張移植する。
 
@@ -915,7 +924,7 @@ Embedding次元は環境変数またはマイグレーション定数で固定�
 
 初期値は1536に固定せず、採用モデルに合わせて明示的に設定する。
 
-## 8.2 memory.experiences
+## 8.2 memory.experiences（最小版実装済み）
 
 ```text
 id UUID PRIMARY KEY
@@ -936,7 +945,7 @@ updated_at TIMESTAMPTZ NOT NULL
 deleted_at TIMESTAMPTZ
 ```
 
-## 8.3 memory.entities
+## 8.3 memory.entities（最小版実装済み）
 
 世界内の実体を表す。
 
@@ -968,20 +977,27 @@ deleted_at TIMESTAMPTZ
 データセット
 ```
 
-## 8.4 memory.entity_aliases
+## 8.4 memory.entity_aliases（実装済み）
 
 ```text
 id UUID PRIMARY KEY
 entity_id UUID NOT NULL
 alias TEXT NOT NULL
-language_code TEXT
-alias_type TEXT
-confidence DOUBLE PRECISION
+normalized_alias TEXT NOT NULL
+language_code TEXT NOT NULL
+alias_type TEXT NOT NULL
+confidence DOUBLE PRECISION NOT NULL
+proposal_source TEXT NOT NULL
+verification_state TEXT NOT NULL
+created_by UUID NOT NULL
 created_at TIMESTAMPTZ NOT NULL
-UNIQUE(entity_id, alias)
+updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
 ```
 
-## 8.5 memory.concepts
+AliasはNFKC、空白整理、小文字化を行い、`entity_id, language_code, normalized_alias`を有効行内で一意にする。
+
+## 8.5 memory.concepts（最小版実装済み）
 
 ```text
 id UUID PRIMARY KEY
@@ -1002,7 +1018,7 @@ updated_at TIMESTAMPTZ NOT NULL
 deleted_at TIMESTAMPTZ
 ```
 
-## 8.6 memory.relations
+## 8.6 memory.relations（最小版実装済み）
 
 イベント間だけでなく、イベント、概念、実体、経験、学習データ間の関係を表現できるようにする。
 
@@ -1056,21 +1072,43 @@ model
 
 初期実装ではポリモーフィック外部キーをデータベースだけで完全保証できないため、サービス層で参照先存在確認を行う。
 
+実装では`event`、`experience`、`entity`、`concept`、`record`、`dataset_snapshot`、`model`をnode typeとする。全Memory行に`created_by`を持たせ、Source・Experience・Relation nodeの参照先が同じ所有者に属し、有効であることをサービス層で検証する。
+
 将来的には型別関連テーブルへの分割も検討する。
 
-## 8.7 memory.relation_evidence
+## 8.7 memory.relation_evidence（実装済み）
 
 ```text
 id UUID PRIMARY KEY
+evidence_uid TEXT NOT NULL
 relation_id UUID NOT NULL
 evidence_type TEXT NOT NULL
 reference_type TEXT NOT NULL
 reference_id UUID
 supports BOOLEAN NOT NULL
 weight DOUBLE PRECISION NOT NULL DEFAULT 1
-details JSONB
+details JSONB NOT NULL DEFAULT '{}'
+created_by UUID NOT NULL
 created_at TIMESTAMPTZ NOT NULL
 ```
+
+Evidenceは追記型とし、Relation内で`evidence_uid`を一意にする。追加とRelationのsupport／counterexample count更新を同一トランザクションで行う。
+
+## 8.7.1 memory.verification_decisions（実装済み）
+
+```text
+id UUID PRIMARY KEY
+target_type TEXT NOT NULL
+target_id UUID NOT NULL
+from_state TEXT NOT NULL
+to_state TEXT NOT NULL
+notes TEXT
+metadata JSONB NOT NULL DEFAULT '{}'
+decided_by UUID NOT NULL
+created_at TIMESTAMPTZ NOT NULL
+```
+
+Event、Entity、Entity Alias、Concept、Relationの検証状態は通常PATCHで変更しない。`memory:verify` scopeを持つadmin／reviewerが期待状態付きで遷移させ、Decision履歴を追記する。
 
 ## 8.8 memory.activations
 
@@ -1371,7 +1409,7 @@ Stability Profileには予測成功・失敗、誤差移動平均、calibration�
 
 # 9. trainingスキーマ
 
-## 9.1 training.models
+## 9.1 training.models（実装済み）
 
 ```text
 id UUID PRIMARY KEY
@@ -1381,23 +1419,34 @@ model_family TEXT
 model_version TEXT
 base_model TEXT
 configuration JSONB NOT NULL DEFAULT '{}'
+created_by UUID NOT NULL
 created_at TIMESTAMPTZ NOT NULL
 updated_at TIMESTAMPTZ NOT NULL
+deleted_at TIMESTAMPTZ
 ```
 
-## 9.2 training.runs
+Model Registryは変更可能である。Runは再現性をこの可変行だけに依存させず、作成時点の定義を`model_snapshot`へ固定する。
+
+## 9.2 training.runs（実装済み）
 
 ```text
 id UUID PRIMARY KEY
 run_uid TEXT UNIQUE NOT NULL
-model_id UUID
-dataset_id UUID
+model_id UUID NOT NULL
+model_snapshot JSONB NOT NULL
+dataset_snapshot_id UUID NOT NULL
 status TEXT NOT NULL
+task_type TEXT NOT NULL
+transformer JSONB NOT NULL
 parameters JSONB NOT NULL DEFAULT '{}'
 environment JSONB NOT NULL DEFAULT '{}'
+code_revision TEXT
+seed INTEGER
+output_object_key TEXT
+error_message TEXT
 started_at TIMESTAMPTZ
 finished_at TIMESTAMPTZ
-created_by UUID
+created_by UUID NOT NULL
 created_at TIMESTAMPTZ NOT NULL
 ```
 
@@ -1411,18 +1460,23 @@ failed
 cancelled
 ```
 
-## 9.3 training.metrics
+Runは完成済みかつ同一所有者のDataset Snapshotだけを参照する。状態とtimestampの整合性はDB CHECKで保証し、APIは更新前statusを条件に含めて同時遷移を拒否する。
+
+## 9.3 training.metrics（実装済み）
 
 ```text
 id UUID PRIMARY KEY
 run_id UUID NOT NULL
-step BIGINT
+step INTEGER NOT NULL
 epoch DOUBLE PRECISION
 metric_name TEXT NOT NULL
 metric_value DOUBLE PRECISION NOT NULL
-metadata JSONB
+split TEXT NOT NULL
+metadata JSONB NOT NULL
 recorded_at TIMESTAMPTZ NOT NULL
 ```
+
+Metricは追記型とし、`run_id, metric_name, split, step`を一意にする。completed後の後続評価も同じRunへ追記できる。
 
 ## 9.4 training.outputs
 
@@ -1739,15 +1793,29 @@ GET    /datasets
 POST   /datasets
 GET    /datasets/:id
 PATCH  /datasets/:id
-DELETE /datasets/:id
-
-GET    /datasets/:id/members
-POST   /datasets/:id/members
-DELETE /datasets/:id/members/:recordId
-POST   /datasets/:id/build
-POST   /datasets/:id/split
-POST   /datasets/:id/export
+GET    /datasets/:id/snapshots
+POST   /datasets/:id/snapshots
+GET    /datasets/:id/snapshots/:snapshotId
+GET    /datasets/:id/snapshots/:snapshotId/manifest
 ```
+
+## 12.6.1 学習実験（実装済み）
+
+```text
+GET    /training/models
+POST   /training/models
+GET    /training/models/:id
+PATCH  /training/models/:id
+
+GET    /training/runs
+POST   /training/runs
+GET    /training/runs/:id
+POST   /training/runs/:id/status
+GET    /training/runs/:id/metrics
+POST   /training/runs/:id/metrics
+```
+
+ModelとRunは所有者境界内で扱う。読み取りに`training:read`、変更に`training:write`を要求する。
 
 ## 12.7 出典
 
@@ -1809,6 +1877,7 @@ PATCH  /memory/entities/:id
 DELETE /memory/entities/:id
 POST   /memory/entities/resolve
 POST   /memory/entities/:id/aliases
+DELETE /memory/entities/:entityId/aliases/:aliasId
 ```
 
 `resolve`は名称、別名、Embedding、外部IDを用いて候補を返す。
@@ -1838,6 +1907,13 @@ DELETE /memory/relations/:id
 POST   /memory/relations/:id/evidence
 GET    /memory/nodes/:type/:id/neighbors
 POST   /memory/traverse
+```
+
+候補検証:
+
+```text
+GET  /memory/verification/:type/:id
+POST /memory/verification/:type/:id
 ```
 
 `/memory/traverse`入力例:
@@ -3018,23 +3094,25 @@ health/readyが200
 ## Phase 6: データセット
 
 ```text
-・datasets
-・members
-・split
-・export
+・Dataset Definition [Done]
+・不変SnapshotとVersion固定member [Done]
+・JSON／JSONL manifestとSHA-256 [Done]
+・Training Runと評価履歴 [Done]
+・Event／Experience／Entity／Concept／Relation [Next]
+・splitと大規模非同期build [Later]
 ```
 
 ## Phase 7: SARA Event Memory
 
 ```text
-・events
-・experiences
-・entities
-・concepts
-・relations
-・evidence
-・traverse
-・グラフ表示
+・events [Done]
+・experiences [Done]
+・entities [Done]
+・concepts [Done]
+・relations [Done]
+・Relation Evidence／Entity Alias／候補検証 [Done]
+・bulk Event／bounded traverse [Next]
+・グラフ表示 [Later]
 ```
 
 ## Phase 8: WordPress連携
@@ -3263,6 +3341,14 @@ Import Job
 Exportは論理削除されていないRecordの現在Versionだけを対象とし、format、filter、件数、byte数、SHA-256をJob履歴へ保存する。過去Version、Annotation、Evaluation、Reviewを含むdataset packageは別仕様として扱う。
 
 実装済みの品質管理層では、共有Tag、Record Version固定のAnnotation、追記型Evaluation、Record Version固定のReviewを`dataset` schemaへ保存する。Review待ちはRecordごとに1件とし、申請中のRecord更新・削除を禁止する。承認、拒否、修正要求はRecord状態変更と同じトランザクションで処理し、監査ログへ記録する。これにより、評価対象だった本文と判定履歴の対応を失わない。
+
+実装済みのDataset層では、再利用可能な抽出条件をDefinitionとして保存し、build時点のDefinition revision、filter、順序付きRecord Versionを不変Snapshotへ固定する。元RecordまたはDefinitionが更新されても既存Snapshotを変更しない。manifestはJSONまたはJSONLとしてMinIOへ保存し、SHA-256をPostgreSQLへ記録する。同期buildは10,000 Recordまでとし、大規模buildはWorkerへ分離する。
+
+実装済みのTraining層では、Model Registry、Training Run、追記型Metricを`training` schemaへ保存する。Runは完成済みDataset Snapshotを参照し、作成時点のModel定義、変換器Version、code revision、seed、parameters、environmentを固定する。Model Registryを後から更新してもRun内`model_snapshot`を変更しない。MetricはRun、name、split、stepを一意にし、completed後のvalidation／test評価も同じRunへ追記できる。
+
+実装済みのMemory Coreでは、Experience、Event、Entity、Concept、Relationを`memory` schemaへ保存する。各行は作成者境界、proposal source、verification state、confidence、Source provenanceを持つ。Relationのnode typeはDB CHECK、参照先の存在・所有者・論理削除状態はサービス層で検証する。LLMやruleが生成した候補を検証済み知識と同じ確度で扱わない。
+
+Relation Evidence、Entity Alias、候補検証フローも実装済みである。Evidenceは追記とRelation count更新を原子的に行い、Aliasは正規化重複を防ぐ。検証状態は直接PATCHせず、期待状態付き更新とDecision履歴追加を同一トランザクションで行う。頻度やsupport countだけでconfidenceやverified状態を自動決定しない。
 
 ```text
 Record Version

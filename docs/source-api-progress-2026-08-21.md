@@ -36,6 +36,10 @@ URLとcontent hashは重複候補の検索に使うが、取得日時や版の�
 - [Done] アノテーション・タグ・評価の最小スキーマとレビュー入口
 - [Done] JSONL／JSON／CSV同期Import・Export
 - [Done] MinIOとWorkerによる大容量非同期処理
-- [Next] Dataset Definition・Snapshot・manifest生成
+- [Done] Dataset Definition・不変Snapshot・manifest生成
+- [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
+- [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
+- [Done] Relation Evidence・Entity Alias・候補検証フロー
+- [Next] Bulk Event ingestion・bounded graph traversal
 - [Later] 重複Source候補の検出と統合支援
 - [Later] WordPress・Importジョブからの冪等なSource登録
