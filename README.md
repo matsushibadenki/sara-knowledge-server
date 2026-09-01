@@ -180,6 +180,10 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Later] Event、Experience、Concept、Entity、Relation
 - [Later] Structure、Delta、TransformationのMemory Schema
 - [Later] 自己組織化Unit、residual、Assemblyの研究プロトタイプ
+- [Later] Fractal Canopy routing、動的深度、branch growth／inactive pruningのcompute-matched実験
+- [Later] Backward information・eligibility trace・階層構造によるlocal credit assignment実験
+- [Later] Dendritic computation・内蔵local learning・複数時間scale・自己形成Canopyの工業的primitive実験
+- [Later] SNN学習の未解決検証、surrogate-gradient baseline、多時間スケールEvent Memory credit
 - [Later] 予測誤差・競合・恒常性・Replayによる構造検証
 - [Later] 構造共有からの未知relation候補生成とheld-out評価
 - [Later] 価値駆動学習、Research Queue、夜間バッチ

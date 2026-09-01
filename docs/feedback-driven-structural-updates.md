@@ -2,7 +2,7 @@
 
 ## 位置づけ
 
-RISAおよびSARA Knowledge Serverでは、フィードバックを誤差逆伝播の勾配そのものとして扱わない。
+RISAおよびSARA Knowledge Serverでは、global gradient Backpropagationを必須としない。ただしBackward informationは禁止せず、フィードバックを誤差逆伝播の勾配そのものには限定しない。
 
 フィードバックは、上位概念・予測・文脈・評価から下位のノードや関係へ返される、**構造をどう変更するかを示す編集指令または編集候補**として扱う。
 
@@ -198,8 +198,10 @@ Knowledge Serverは、RISAの編集アルゴリズムを実行する場所では
 
 ## 設計上の結論
 
-このプロジェクトでのフィードバック結合は、誤差逆伝播の代替実装ではない。
+このプロジェクトでのフィードバック結合は、誤差逆伝播と同じgradientを近似するだけの代替実装には限定しない。一方で、global Backpropが解いているcredit assignment問題を、局所信号・時間・階層構造・modulation・構造可塑性でどこまで解けるかを明示的な研究対象とする。
 
 それは、予測・文脈・評価・反例を利用し、知識グラフやイベント構造を局所的かつ監査可能に編集するための仕組みである。
 
 この分離により、SARAやRISAは構造を継続的に洗練でき、Knowledge Serverはその変更履歴と根拠を失わずに保持できる。
+
+詳細な実験方針は`hierarchical-local-credit-assignment.md`を参照する。

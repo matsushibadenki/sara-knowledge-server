@@ -62,6 +62,22 @@
 - [Later] checkpoint／artifact詳細、Run比較、trainer callback認証
 - [Later] confidence calibration、独立Source集計、合議レビュー
 - [Later] Embedding、Activation、Replay
+- [Later] Fractal Canopy FC-0〜FC-1：compute-matched dense／MoD／flat MoEとの固定階層routing比較
+- [Later] Fractal Canopy FC-2：branch drop-path、浅深subpath、calibrated early exit
+- [Later] Fractal Canopy FC-3：予測利得と計算costに基づくbranch growth／inactive pruning
+- [Later] Fractal Canopy FC-4〜FC-5：budget付きcross-link、RISA共有Unit、routing履歴保存
+- [Later] HLC-0〜HLC-1：Backprop oracle付きhierarchical local credit benchmark／ablation
+- [Later] HLC-2：delayed reward、eligibility trace、replayによる長期credit
+- [Later] HLC-3：weight learning＋branch growth＋reversible inactive pruning
+- [Later] HLC-4：Fractal Canopy／SNNのactive-path credit assignment
+- [Later] ICP-0〜ICP-1：Dendritic Local Unit／Soma Unitとnetwork内蔵local learning
+- [Later] ICP-2：Canopyを事前設計しないgrowth／reversible inactive pruning
+- [Later] ICP-3：Unit・Circuit・Module間で反復するalgorithmic self-similarity
+- [Later] ICP-4〜ICP-5：recurrence、複数時間scale、online continual learning
+- [Later] SNN-L0〜L1：point／multi-branch、chain／tree、local causal credit比較
+- [Later] SNN-L2：fast／medium trace＋Event Memoryによるdelayed-credit benchmark
+- [Later] SNN-L3〜L4：構造可塑性、branch再利用、online continual learning
+- [Later] SNN-L5：surrogate-gradient SNNを含むgate付きlong-sequence拡張
 - [Later] RISA / SARA Engine連携
 - [Later] WordPress signed sync adapter、差分同期、障害再送
 - [Later] ベクトル検索、価値駆動学習、Research Queue

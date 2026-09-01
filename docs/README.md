@@ -20,6 +20,10 @@
 
 ## 現在の主要ドキュメント
 
+- `snn-learning-open-problems.md`: SNN学習の未解決点、多時間スケールcredit memory、必須baseline
+- `industrial-neural-computational-primitives.md`: 脳の計算原理を交換可能な工業部品へ置換する研究設計
+- `hierarchical-local-credit-assignment.md`: global gradientを必須としない階層的local credit研究方針
+- `fractal-canopy-routing-research.md`: 自己相似的階層routing、動的深度、branch成長・剪定の段階実験
 - `async-event-ingestion.md`: 501〜10,000 Eventの非同期・原子的取り込み
 - `async-event-ingestion-progress-2026-09-01.md`: 非同期Event節目の実装・検証記録
 - `signed-worker-ingestion.md`: 外部WorkerのHMAC署名、nonce、冪等再送、配置境界
