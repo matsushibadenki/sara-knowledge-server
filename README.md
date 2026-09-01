@@ -172,7 +172,8 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Done] Bulk Event ingestion・bounded graph traversal
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
 - [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
-- [Next] Asset API・upload authorization・provenance binding
+- [Done] Asset API・upload authorization・provenance binding
+- [Next] Asset processing jobs・media metadata extraction・derived-Asset provenance
 
 ### 将来設計
 
@@ -318,6 +319,13 @@ GET    /training/runs/:id
 POST   /training/runs/:id/status
 GET    /training/runs/:id/metrics
 POST   /training/runs/:id/metrics
+
+GET    /assets
+POST   /assets/upload-url
+GET    /assets/:id
+POST   /assets/:id/complete
+GET    /assets/:id/download-url
+DELETE /assets/:id
 
 GET    /memory/experiences
 POST   /memory/experiences

@@ -5,6 +5,8 @@ import { closeDatabase, db } from '../src/db/client.js';
 import {
   apiKeys,
   annotations,
+  assetBindings,
+  assets,
   auditLogs,
   datasetDefinitions,
   datasetSnapshotRecords,
@@ -55,6 +57,7 @@ const createdTagIds = [];
 const createdImportJobIds = [];
 const createdExportJobIds = [];
 const createdObjectKeys = [];
+const createdAssetIds = [];
 const createdDatasetDefinitionIds = [];
 const createdDatasetSnapshotIds = [];
 const createdTrainingModelIds = [];
@@ -108,6 +111,10 @@ afterAll(async () => {
   }
   if (createdExportJobIds.length > 0) {
     await db.delete(exportJobs).where(inArray(exportJobs.id, createdExportJobIds));
+  }
+  if (createdAssetIds.length > 0) {
+    await db.delete(assetBindings).where(inArray(assetBindings.assetId, createdAssetIds));
+    await db.delete(assets).where(inArray(assets.id, createdAssetIds));
   }
   if (createdMemoryRelationIds.length > 0) {
     if (createdMemoryEvidenceIds.length > 0) {
@@ -932,6 +939,104 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
     body: JSON.stringify({ event_uid: eventUid, modality: 'audio', event_type: 'observation', proposal_source: 'human' }),
   });
   expect(duplicateEvent.response.status).toBe(409);
+
+  const assetBytes = new TextEncoder().encode('integration-image-bytes');
+  const assetDigest = await crypto.subtle.digest('SHA-256', assetBytes);
+  const assetSha256 = `sha256:${Array.from(new Uint8Array(assetDigest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  const invalidAssetBinding = await request('/api/v1/assets/upload-url', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      original_filename: 'invalid.png', mime_type: 'image/png', size_bytes: assetBytes.byteLength,
+      sha256: assetSha256,
+      bindings: [{ target_type: 'event', target_id: crypto.randomUUID(), role: 'observation' }],
+    }),
+  });
+  expect(invalidAssetBinding.response.status).toBe(404);
+  expect(invalidAssetBinding.body.error.code).toBe('BINDING_TARGET_NOT_FOUND');
+
+  const assetReservation = await request('/api/v1/assets/upload-url', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      original_filename: 'observation.png', mime_type: 'image/png', size_bytes: assetBytes.byteLength,
+      sha256: assetSha256, width: 1, height: 1, metadata: { fixture: true },
+      bindings: [
+        { target_type: 'source', target_id: sourceId, role: 'origin' },
+        { target_type: 'record', target_id: recordId, role: 'attachment' },
+        { target_type: 'event', target_id: memoryEvent.body.data.id, role: 'observation' },
+      ],
+    }),
+  });
+  expect(assetReservation.response.status).toBe(201);
+  expect(assetReservation.body.data.status).toBe('pending');
+  expect(assetReservation.body.data.bindings).toHaveLength(3);
+  expect(assetReservation.body.meta.duplicate_asset_ids).toHaveLength(0);
+  createdAssetIds.push(assetReservation.body.data.id);
+  const [assetStorage] = await db.select({ objectKey: assets.objectKey }).from(assets)
+    .where(eq(assets.id, assetReservation.body.data.id));
+  createdObjectKeys.push(assetStorage.objectKey);
+
+  const assetUpload = await fetch(assetReservation.body.data.upload_url, {
+    method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: assetBytes,
+  });
+  expect(assetUpload.ok).toBe(true);
+  const assetComplete = await request(`/api/v1/assets/${assetReservation.body.data.id}/complete`, {
+    method: 'POST', headers, body: JSON.stringify({}),
+  });
+  expect(assetComplete.response.status).toBe(200);
+  expect(assetComplete.body.data.status).toBe('ready');
+  expect(assetComplete.body.meta.replayed).toBe(false);
+  const assetCompleteReplay = await request(`/api/v1/assets/${assetReservation.body.data.id}/complete`, {
+    method: 'POST', headers, body: JSON.stringify({}),
+  });
+  expect(assetCompleteReplay.response.status).toBe(200);
+  expect(assetCompleteReplay.body.meta.replayed).toBe(true);
+
+  const assetDetail = await request(`/api/v1/assets/${assetReservation.body.data.id}`, { headers });
+  expect(assetDetail.response.status).toBe(200);
+  expect(assetDetail.body.data.bindings.map((binding) => binding.target_type).sort()).toEqual(['event', 'record', 'source']);
+  const assetDownload = await request(`/api/v1/assets/${assetReservation.body.data.id}/download-url`, { headers });
+  expect(assetDownload.response.status).toBe(200);
+  const downloadedAsset = new Uint8Array(await (await fetch(assetDownload.body.data.download_url)).arrayBuffer());
+  expect(downloadedAsset).toEqual(assetBytes);
+
+  const duplicateAssetReservation = await request('/api/v1/assets/upload-url', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      original_filename: 'duplicate.png', mime_type: 'image/png', size_bytes: assetBytes.byteLength,
+      sha256: assetSha256,
+      bindings: [{ target_type: 'record', target_id: recordId, role: 'duplicate-candidate' }],
+    }),
+  });
+  expect(duplicateAssetReservation.response.status).toBe(201);
+  expect(duplicateAssetReservation.body.meta.duplicate_asset_ids).toContain(assetReservation.body.data.id);
+  createdAssetIds.push(duplicateAssetReservation.body.data.id);
+
+  const wrongBytes = new TextEncoder().encode('integration-image-byteX');
+  expect(wrongBytes.byteLength).toBe(assetBytes.byteLength);
+  const mismatchedReservation = await request('/api/v1/assets/upload-url', {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      original_filename: 'mismatch.png', mime_type: 'image/png', size_bytes: wrongBytes.byteLength,
+      sha256: assetSha256,
+      bindings: [{ target_type: 'record', target_id: recordId, role: 'hash-test' }],
+    }),
+  });
+  expect(mismatchedReservation.response.status).toBe(201);
+  createdAssetIds.push(mismatchedReservation.body.data.id);
+  const [mismatchStorage] = await db.select({ objectKey: assets.objectKey }).from(assets)
+    .where(eq(assets.id, mismatchedReservation.body.data.id));
+  createdObjectKeys.push(mismatchStorage.objectKey);
+  expect((await fetch(mismatchedReservation.body.data.upload_url, { method: 'PUT', body: wrongBytes })).ok).toBe(true);
+  const mismatchedComplete = await request(`/api/v1/assets/${mismatchedReservation.body.data.id}/complete`, {
+    method: 'POST', headers, body: JSON.stringify({}),
+  });
+  expect(mismatchedComplete.response.status).toBe(422);
+  expect(mismatchedComplete.body.error.code).toBe('ASSET_HASH_MISMATCH');
+
+  const assetDeleted = await request(`/api/v1/assets/${assetReservation.body.data.id}`, { method: 'DELETE', headers });
+  expect(assetDeleted.response.status).toBe(200);
+  const deletedAssetRead = await request(`/api/v1/assets/${assetReservation.body.data.id}`, { headers });
+  expect(deletedAssetRead.response.status).toBe(404);
 
   const batchUid = `batch-${crypto.randomUUID()}`;
   const bulkEvents = [1, 2, 3].map((position) => ({

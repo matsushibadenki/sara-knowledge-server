@@ -38,6 +38,7 @@ export const apiKeyScopes = [
   'memory:verify',
   'imports:create',
   'exports:create',
+  'assets:read',
   'assets:write',
   'webhooks:manage',
 ];

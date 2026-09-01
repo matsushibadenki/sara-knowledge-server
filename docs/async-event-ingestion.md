@@ -47,6 +47,6 @@ Stale processing jobs are re-queued after five minutes. API-key submissions reta
 
 - [Done] Object-backed jobs, PostgreSQL claim, Redis wake-up, cancellation, stale recovery
 - [Done] Atomic publication of 501–10,000 ordered events
-- [Next] Asset API with upload authorization and provenance binding
+- [Done] Asset API with upload authorization and provenance binding
+- [Next] Asset processing jobs and derived-Asset provenance
 - [Later] Staged ingestion for batches larger than 10,000
-

@@ -6,5 +6,5 @@
 - [Done] Applied migration `0021_peaceful_enchantress.sql`.
 - [Done] Verified a real 501-event job through API, Redis, Worker, MinIO, and PostgreSQL.
 - [Done] Passed 10 tests and 335 assertions.
-- [Next] Asset API with upload authorization and provenance binding.
-
+- [Done] Asset API with upload authorization and provenance binding.
+- [Next] Asset processing jobs and derived-Asset provenance.

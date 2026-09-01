@@ -1,5 +1,6 @@
 // /apps/api/src/db/schema/index.js
 import {
+  bigint,
   boolean,
   check,
   doublePrecision,
@@ -124,6 +125,49 @@ export const sources = datasetSchema.table('sources', {
     'sources_source_type_check',
     sql`${table.sourceType} IN ('manual', 'website', 'document', 'book', 'dataset', 'conversation', 'sensor', 'generated', 'imported', 'wordpress')`,
   ),
+}));
+
+export const assets = datasetSchema.table('assets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  bucketName: text('bucket_name').notNull(),
+  objectKey: text('object_key').notNull().unique(),
+  originalFilename: text('original_filename').notNull(),
+  mimeType: text('mime_type').notNull(),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+  sha256: text('sha256').notNull(),
+  status: text('status').notNull().default('pending'),
+  width: integer('width'),
+  height: integer('height'),
+  durationMs: bigint('duration_ms', { mode: 'number' }),
+  metadata: jsonb('metadata').notNull().default({}),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  ...auditColumns,
+}, (table) => ({
+  creatorTimelineIndex: index('assets_creator_timeline_idx').on(table.createdBy, table.createdAt),
+  activeCreatorHashIndex: index('assets_active_creator_hash_idx')
+    .on(table.createdBy, table.sha256).where(sql`${table.deletedAt} IS NULL`),
+  pendingTimelineIndex: index('assets_pending_timeline_idx')
+    .on(table.createdAt).where(sql`${table.status} = 'pending' AND ${table.deletedAt} IS NULL`),
+  statusCheck: check('assets_status_check', sql`${table.status} IN ('pending', 'ready')`),
+  sizeCheck: check('assets_size_check', sql`${table.sizeBytes} > 0`),
+  dimensionsCheck: check('assets_dimensions_check', sql`(${table.width} IS NULL OR ${table.width} > 0) AND (${table.height} IS NULL OR ${table.height} > 0) AND (${table.durationMs} IS NULL OR ${table.durationMs} >= 0)`),
+}));
+
+export const assetBindings = datasetSchema.table('asset_bindings', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  assetId: uuid('asset_id').notNull().references(() => assets.id, { onDelete: 'cascade' }),
+  targetType: text('target_type').notNull(),
+  targetId: uuid('target_id').notNull(),
+  role: text('role').notNull().default('attachment'),
+  metadata: jsonb('metadata').notNull().default({}),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  assetTargetRoleUnique: uniqueIndex('asset_bindings_asset_target_role_unique')
+    .on(table.assetId, table.targetType, table.targetId, table.role),
+  targetIndex: index('asset_bindings_target_idx').on(table.targetType, table.targetId, table.createdAt),
+  createdByIndex: index('asset_bindings_created_by_idx').on(table.createdBy),
+  targetTypeCheck: check('asset_bindings_target_type_check', sql`${table.targetType} IN ('source', 'record', 'event')`),
 }));
 
 export const records = datasetSchema.table('records', {

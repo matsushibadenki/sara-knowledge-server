@@ -11,6 +11,7 @@ import { exportRoutes, importRoutes } from './routes/import-export.js';
 import datasetRoutes from './routes/datasets.js';
 import trainingRoutes from './routes/training.js';
 import memoryRoutes from './routes/memory.js';
+import assetRoutes from './routes/assets.js';
 
 const app = new Hono();
 const allowedOrigins = new Set(
@@ -271,6 +272,22 @@ app.get('/openapi.json', (c) => c.json({
     '/memory/traverse': {
       post: { summary: 'Traverse an owned memory graph within hard depth and size limits', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
     },
+    '/assets/upload-url': {
+      post: { summary: 'Reserve Asset metadata and create a five-minute presigned upload URL', security: [{ bearerAuth: [] }], 'x-required-scope': 'assets:write' },
+    },
+    '/assets': {
+      get: { summary: 'List owned active Assets', security: [{ bearerAuth: [] }], 'x-required-scope': 'assets:read' },
+    },
+    '/assets/{id}/complete': {
+      post: { summary: 'Verify uploaded size and SHA-256 before making an Asset ready', security: [{ bearerAuth: [] }], 'x-required-scope': 'assets:write' },
+    },
+    '/assets/{id}': {
+      get: { summary: 'Get owned Asset metadata and provenance bindings', security: [{ bearerAuth: [] }], 'x-required-scope': 'assets:read' },
+      delete: { summary: 'Soft-delete Asset metadata and remove its object', security: [{ bearerAuth: [] }], 'x-required-scope': 'assets:write' },
+    },
+    '/assets/{id}/download-url': {
+      get: { summary: 'Create a five-minute presigned download URL for a ready Asset', security: [{ bearerAuth: [] }], 'x-required-scope': 'assets:read' },
+    },
     '/sources': {
       get: { summary: 'List sources', security: [{ bearerAuth: [] }], 'x-required-scope': 'sources:read', 'x-allowed-user-roles': ['admin', 'editor', 'reviewer', 'viewer'] },
       post: { summary: 'Create a source', security: [{ bearerAuth: [] }], 'x-required-scope': 'sources:write', 'x-allowed-user-roles': ['admin', 'editor'] },
@@ -310,6 +327,8 @@ app.route('/training', trainingRoutes);
 app.route('/api/v1/training', trainingRoutes);
 app.route('/memory', memoryRoutes);
 app.route('/api/v1/memory', memoryRoutes);
+app.route('/assets', assetRoutes);
+app.route('/api/v1/assets', assetRoutes);
 app.route('/sources', sourcesRoutes);
 app.route('/api/v1/sources', sourcesRoutes);
 app.route('/audit-logs', auditLogRoutes);

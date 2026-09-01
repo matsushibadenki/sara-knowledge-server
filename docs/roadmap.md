@@ -54,7 +54,8 @@
 - [Done] Bulk Event ingestion・bounded graph traversal
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
 - [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
-- [Next] Asset API・upload authorization・provenance binding
+- [Done] Asset API・upload authorization・provenance binding
+- [Next] Asset processing jobs・media metadata extraction・derived-Asset provenance
 - [Later] Staging tableを使う10,000件超のEvent ingestion
 - [Later] login・APIキー・Import／Exportの監査拡張
 - [Later] 監査DB role分離、tamper evidence、保存期間・partition

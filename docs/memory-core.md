@@ -106,5 +106,6 @@ GET /api/v1/memory/nodes/:type/:id/neighbors
 - [Done] Bulk Event ingestion・bounded graph traversal
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
 - [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
-- [Next] Asset API・upload authorization・provenance binding
+- [Done] Asset API・upload authorization・provenance binding
+- [Next] Asset processing jobs・derived-Asset provenance
 - [Later] bulk Event、traverse、embedding、activation、Replay

@@ -20,6 +20,8 @@
 
 ## 現在の主要ドキュメント
 
+- `assets.md`: Binary Asset lifecycle、presigned URL、hash検証、provenance binding
+- `asset-api-progress-2026-09-02.md`: Asset API節目の実装・検証記録
 - `snn-learning-open-problems.md`: SNN学習の未解決点、多時間スケールcredit memory、必須baseline
 - `industrial-neural-computational-primitives.md`: 脳の計算原理を交換可能な工業部品へ置換する研究設計
 - `hierarchical-local-credit-assignment.md`: global gradientを必須としない階層的local credit研究方針
