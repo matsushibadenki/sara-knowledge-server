@@ -6,4 +6,5 @@
 - [Done] Verified unsigned rejection, valid signature, nonce replay rejection, safe retry, expired timestamp, and body tampering.
 - [Done] Migration `0020_married_ma_gnuci.sql` applied successfully.
 - [Done] Integration suite passed 10 tests and 321 assertions.
-- [Next] Queue-backed asynchronous Event ingestion for batches larger than 500.
+- [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events.
+- [Next] Asset API with upload authorization and provenance binding.

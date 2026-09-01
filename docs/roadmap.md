@@ -53,7 +53,9 @@
 - [Done] Relation Evidence・Entity Alias・候補検証フロー
 - [Done] Bulk Event ingestion・bounded graph traversal
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
-- [Next] Queue-backed asynchronous Event ingestion for batches over 500
+- [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
+- [Next] Asset API・upload authorization・provenance binding
+- [Later] Staging tableを使う10,000件超のEvent ingestion
 - [Later] login・APIキー・Import／Exportの監査拡張
 - [Later] 監査DB role分離、tamper evidence、保存期間・partition
 - [Later] Dataset split・大規模非同期build・モデル別変換器

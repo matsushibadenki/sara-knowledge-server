@@ -54,6 +54,6 @@ TLS, clock synchronization, secret rotation, and log redaction remain operationa
 
 - [Done] HMAC signing, timestamp validation, nonce replay protection, and batch idempotency
 - [Done] Indexed nonce retention and API-key-scoped uniqueness
-- [Next] Queue-backed asynchronous Event ingestion for batches larger than 500
+- [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
+- [Next] Asset API with upload authorization and provenance binding
 - [Later] API key rotation overlap and per-worker rate limits
-

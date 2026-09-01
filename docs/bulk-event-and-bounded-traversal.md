@@ -34,4 +34,5 @@ The bulk endpoint atomically ingests 1–500 ordered events. A creator-scoped ba
 - [Done] Atomic, ordered, idempotent Bulk Event ingestion
 - [Done] Bounded and filtered memory graph traversal
 - [Done] SARA／external Worker HTTPS ingestion with HMAC signing and replay protection
-- [Next] Queue-backed asynchronous batches larger than 500 events
+- [Done] Queue-backed asynchronous ingestion for 501〜10,000 events
+- [Next] Asset API with upload authorization and provenance binding

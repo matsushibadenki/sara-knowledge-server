@@ -171,7 +171,8 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Done] Relation Evidence・Entity Alias・候補検証フロー
 - [Done] Bulk Event ingestion・bounded graph traversal
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
-- [Next] Queue-backed asynchronous Event ingestion for batches over 500
+- [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
+- [Next] Asset API・upload authorization・provenance binding
 
 ### 将来設計
 
@@ -323,10 +324,13 @@ DELETE /memory/experiences/:id
 GET    /memory/events
 POST   /memory/events
 POST   /memory/events/bulk
+POST   /memory/events/async
 GET    /memory/events/:id
 PATCH  /memory/events/:id
 DELETE /memory/events/:id
 POST   /memory/traverse
+GET    /memory/event-jobs/:id
+POST   /memory/event-jobs/:id/cancel
 
 GET    /memory/entities
 POST   /memory/entities

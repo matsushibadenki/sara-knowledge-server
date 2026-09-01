@@ -228,6 +228,19 @@ app.get('/openapi.json', (c) => c.json({
         'x-api-key-hmac-required': true,
       },
     },
+    '/memory/events/async': {
+      post: {
+        summary: 'Store and enqueue an atomic Event batch of 501 to 10,000 events',
+        description: 'The source payload is stored in object storage. API keys require the same X-SARA HMAC headers as synchronous bulk ingestion.',
+        security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write', 'x-api-key-hmac-required': true,
+      },
+    },
+    '/memory/event-jobs/{id}': {
+      get: { summary: 'Get an asynchronous Event ingestion job', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+    },
+    '/memory/event-jobs/{id}/cancel': {
+      post: { summary: 'Request cancellation of a queued or processing Event job', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write', 'x-api-key-access': false },
+    },
     '/memory/entities': {
       get: { summary: 'List owned entities', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
       post: { summary: 'Create an entity candidate', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },

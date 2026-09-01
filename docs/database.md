@@ -156,10 +156,11 @@ docker compose exec api bun run db:migrate
 - [Done] Relation Evidence・Entity Alias・候補検証フロー
 - [Done] Bulk Event ingestion・bounded graph traversal
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
-- [Next] Queue-backed asynchronous Event ingestion for batches over 500
+- [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
+- [Next] Asset API・upload authorization・provenance binding
 
 ## 将来のMemory Schema
 
-Structure、型付きDelta、Transformation Pattern、自己組織化する共有Unit、力学的なStability ProfileとReplay履歴は設計採用済みだが、現在のmigrationにはまだ追加しない。外部WorkerのHMAC署名・nonce replay防止まで完成した。次は500件を超えるEvent batchをqueue経由で処理する。
+Structure、型付きDelta、Transformation Pattern、自己組織化する共有Unit、力学的なStability ProfileとReplay履歴は設計採用済みだが、現在のmigrationにはまだ追加しない。501〜10,000件のEvent batchをqueue経由で原子的に確定できる。次は画像・音声等のAsset APIとprovenance bindingを実装する。
 
 StructureとDeltaの将来スキーマは`structure-delta-transformation-memory.md`、共有Unitの実験設計は`self-organizing-shared-representations.md`、動的検証は`dynamical-structural-validation.md`を参照する。UnitとStability関連スキーマはtoy experimentで有効性を確認してから確定する。

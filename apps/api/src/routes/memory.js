@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { and, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { requireAuth, requireRoles, requireScopes } from '../auth/middleware.js';
+import { requireAuth, requireRoles, requireScopes, requireUserAuth } from '../auth/middleware.js';
 import { requireSignedApiKeyRequest } from '../auth/hmac.js';
 import { db } from '../db/client.js';
 import {
@@ -10,6 +10,7 @@ import {
   memoryEntities,
   memoryEntityAliases,
   memoryEventIngestionBatches,
+  memoryEventIngestionJobs,
   memoryEvents,
   memoryExperiences,
   memoryRelationEvidence,
@@ -19,6 +20,7 @@ import {
   sources,
   trainingModels,
 } from '../db/schema/index.js';
+import { enqueueBackgroundJob, storeObject } from '../services/background-jobs.js';
 
 const uuidSchema = z.string().uuid();
 const jsonObject = z.record(z.string(), z.unknown());
@@ -146,6 +148,10 @@ const eventBulkSchema = z.object({
   batch_uid: z.string().trim().min(1).max(200),
   events: z.array(eventSchema).min(1).max(500),
 }).strict();
+const eventAsyncSchema = z.object({
+  batch_uid: z.string().trim().min(1).max(200),
+  events: z.array(eventSchema).min(501).max(10000),
+}).strict();
 const traverseSchema = z.object({
   start_nodes: z.array(z.object({ type: nodeType, id: uuidSchema }).strict()).min(1).max(10),
   relation_types: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
@@ -179,6 +185,13 @@ const serializers = {
 const serializeAlias = (item) => ({ ...common(item), entity_id: item.entityId, alias: item.alias, normalized_alias: item.normalizedAlias, language_code: item.languageCode, alias_type: item.aliasType, confidence: item.confidence, proposal_source: item.proposalSource, verification_state: item.verificationState });
 const serializeEvidence = (item) => ({ id: item.id, evidence_uid: item.evidenceUid, relation_id: item.relationId, evidence_type: item.evidenceType, reference_type: item.referenceType, reference_id: item.referenceId, supports: item.supports, weight: item.weight, details: item.details, created_by: item.createdBy, created_at: item.createdAt });
 const serializeDecision = (item) => ({ id: item.id, target_type: item.targetType, target_id: item.targetId, from_state: item.fromState, to_state: item.toState, notes: item.notes, metadata: item.metadata, decided_by: item.decidedBy, created_at: item.createdAt });
+const serializeEventJob = (item) => ({
+  id: item.id, batch_uid: item.batchUid, content_hash: item.contentHash, status: item.status,
+  event_count: item.eventCount, processed_count: item.processedCount,
+  cancel_requested: item.cancelRequested, ingestion_batch_id: item.ingestionBatchId,
+  error_message: item.errorMessage, created_at: item.createdAt,
+  started_at: item.startedAt, completed_at: item.completedAt,
+});
 
 const mappings = {
   experience: (v) => ({ experienceUid: v.experience_uid, sourceId: v.source_id ?? null, title: v.title ?? null, stateBefore: v.state_before ?? null, eventSummary: v.event_summary, stateAfter: v.state_after ?? null, reward: v.reward, predictionError: v.prediction_error, qualityScore: v.quality_score, curriculumLevel: v.curriculum_level, splitName: v.split_name, metadata: v.metadata }),
@@ -374,6 +387,73 @@ memoryRoutes.post('/events/bulk', requireScopes('memory:write'), requireRoles('a
       .orderBy(memoryEvents.batchPosition);
     return c.json({ data: { batch_id: existing.id, batch_uid: existing.batchUid, content_hash: existing.contentHash, event_count: existing.eventCount, replayed: true, events: events.map(serializers.event) }, meta: {}, error: null });
   }
+});
+
+memoryRoutes.post('/events/async', requireScopes('memory:write'), requireRoles('admin', 'editor'), requireSignedApiKeyRequest, async (c) => {
+  const input = eventAsyncSchema.safeParse(await c.req.json().catch(() => null));
+  if (!input.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Async Event batch is invalid.', input.error.issues);
+  const eventUids = input.data.events.map((event) => event.event_uid);
+  if (new Set(eventUids).size !== eventUids.length) return errorResponse(c, 400, 'DUPLICATE_EVENT_UID', 'event_uid values must be unique within a batch.');
+  const ownerId = c.get('auth').sub;
+  const referenceError = await validateBulkEventReferences(input.data.events, ownerId);
+  if (referenceError) return errorResponse(c, 404, referenceError.code, referenceError.message);
+  const hash = await contentHash(input.data.events);
+  const [existing] = await db.select().from(memoryEventIngestionJobs).where(and(
+    eq(memoryEventIngestionJobs.createdBy, ownerId), eq(memoryEventIngestionJobs.batchUid, input.data.batch_uid),
+  )).limit(1);
+  if (existing) {
+    if (existing.contentHash !== hash) return errorResponse(c, 409, 'BATCH_UID_CONFLICT', 'batch_uid was already used with different event content.');
+    return c.json({ data: serializeEventJob(existing), meta: { replayed: true }, error: null });
+  }
+  const [completedBatch] = await db.select().from(memoryEventIngestionBatches).where(and(
+    eq(memoryEventIngestionBatches.createdBy, ownerId), eq(memoryEventIngestionBatches.batchUid, input.data.batch_uid),
+  )).limit(1);
+  if (completedBatch) return errorResponse(c, 409, 'BATCH_UID_CONFLICT', 'batch_uid already belongs to an ingested batch.');
+  const content = JSON.stringify({ events: input.data.events });
+  const byteSize = new TextEncoder().encode(content).byteLength;
+  const maxBytes = Number(process.env.MAX_UPLOAD_SIZE_MB || 100) * 1024 * 1024;
+  if (byteSize > maxBytes) return errorResponse(c, 413, 'EVENT_BATCH_TOO_LARGE', `Async Event batches are limited to ${maxBytes} bytes.`);
+  const jobId = crypto.randomUUID();
+  const objectKey = `memory/event-jobs/${ownerId}/${jobId}/events.json`;
+  await storeObject(objectKey, content, 'application/json');
+  try {
+    const [job] = await db.insert(memoryEventIngestionJobs).values({
+      id: jobId, batchUid: input.data.batch_uid, contentHash: hash, objectKey,
+      eventCount: input.data.events.length, createdBy: ownerId,
+    }).returning();
+    await enqueueBackgroundJob('memory-events', job.id);
+    return c.json({ data: serializeEventJob(job), meta: { replayed: false }, error: null }, 202);
+  } catch (error) {
+    if (error?.code !== '23505') throw error;
+    const [concurrent] = await db.select().from(memoryEventIngestionJobs).where(and(
+      eq(memoryEventIngestionJobs.createdBy, ownerId), eq(memoryEventIngestionJobs.batchUid, input.data.batch_uid),
+    )).limit(1);
+    if (!concurrent || concurrent.contentHash !== hash) return errorResponse(c, 409, 'BATCH_UID_CONFLICT', 'batch_uid was already used with different event content.');
+    return c.json({ data: serializeEventJob(concurrent), meta: { replayed: true }, error: null });
+  }
+});
+
+memoryRoutes.get('/event-jobs/:id', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const id = uuidSchema.safeParse(c.req.param('id'));
+  if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Event job ID must be a UUID.');
+  const [job] = await db.select().from(memoryEventIngestionJobs).where(and(
+    eq(memoryEventIngestionJobs.id, id.data), eq(memoryEventIngestionJobs.createdBy, c.get('auth').sub),
+  )).limit(1);
+  return job ? c.json({ data: serializeEventJob(job), meta: {}, error: null }) : errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Event job was not found.');
+});
+
+memoryRoutes.post('/event-jobs/:id/cancel', requireUserAuth, requireScopes('memory:write'), requireRoles('admin', 'editor'), async (c) => {
+  const id = uuidSchema.safeParse(c.req.param('id'));
+  if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Event job ID must be a UUID.');
+  const [job] = await db.update(memoryEventIngestionJobs).set({ cancelRequested: true }).where(and(
+    eq(memoryEventIngestionJobs.id, id.data), eq(memoryEventIngestionJobs.createdBy, c.get('auth').sub),
+    inArray(memoryEventIngestionJobs.status, ['queued', 'processing']),
+  )).returning();
+  if (job) return c.json({ data: serializeEventJob(job), meta: {}, error: null });
+  const [existing] = await db.select({ id: memoryEventIngestionJobs.id }).from(memoryEventIngestionJobs).where(and(
+    eq(memoryEventIngestionJobs.id, id.data), eq(memoryEventIngestionJobs.createdBy, c.get('auth').sub),
+  )).limit(1);
+  return existing ? errorResponse(c, 409, 'JOB_NOT_CANCELLABLE', 'Only queued or processing Event jobs can be cancelled.') : errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Event job was not found.');
 });
 
 registerCrud({ path: 'experiences', singular: 'experience', table: memoryExperiences, schema: experienceSchema, mapper: mappings.experience, validate: sourceValidator('source_id') });

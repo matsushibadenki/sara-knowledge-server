@@ -105,5 +105,6 @@ GET /api/v1/memory/nodes/:type/:id/neighbors
 - [Done] Relation Evidence・Entity Alias・候補検証フロー
 - [Done] Bulk Event ingestion・bounded graph traversal
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
-- [Next] Queue-backed asynchronous Event ingestion for batches over 500
+- [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
+- [Next] Asset API・upload authorization・provenance binding
 - [Later] bulk Event、traverse、embedding、activation、Replay

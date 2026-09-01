@@ -509,7 +509,33 @@ export const memoryEventIngestionBatches = memorySchema.table('event_ingestion_b
 }, (table) => ({
   creatorUidUnique: uniqueIndex('memory_event_batches_creator_uid_unique').on(table.createdBy, table.batchUid),
   creatorTimelineIndex: index('memory_event_batches_creator_timeline_idx').on(table.createdBy, table.createdAt),
-  eventCountCheck: check('memory_event_batches_event_count_check', sql`${table.eventCount} BETWEEN 1 AND 500`),
+  eventCountCheck: check('memory_event_batches_event_count_check', sql`${table.eventCount} BETWEEN 1 AND 10000`),
+}));
+
+export const memoryEventIngestionJobs = memorySchema.table('event_ingestion_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  batchUid: text('batch_uid').notNull(),
+  contentHash: text('content_hash').notNull(),
+  objectKey: text('object_key').notNull(),
+  status: text('status').notNull().default('queued'),
+  eventCount: integer('event_count').notNull(),
+  processedCount: integer('processed_count').notNull().default(0),
+  cancelRequested: boolean('cancel_requested').notNull().default(false),
+  workerId: text('worker_id'),
+  ingestionBatchId: uuid('ingestion_batch_id').references(() => memoryEventIngestionBatches.id),
+  errorMessage: text('error_message'),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, (table) => ({
+  creatorBatchUnique: uniqueIndex('memory_event_jobs_creator_batch_unique').on(table.createdBy, table.batchUid),
+  creatorTimelineIndex: index('memory_event_jobs_creator_timeline_idx').on(table.createdBy, table.createdAt),
+  queuedIndex: index('memory_event_jobs_queued_idx').on(table.createdAt)
+    .where(sql`${table.status} IN ('queued', 'processing')`),
+  ingestionBatchIdIndex: index('memory_event_jobs_ingestion_batch_id_idx').on(table.ingestionBatchId),
+  statusCheck: check('memory_event_jobs_status_check', sql`${table.status} IN ('queued', 'processing', 'completed', 'failed', 'cancelled')`),
+  countsCheck: check('memory_event_jobs_counts_check', sql`${table.eventCount} BETWEEN 501 AND 10000 AND ${table.processedCount} BETWEEN 0 AND ${table.eventCount}`),
 }));
 
 export const memoryEvents = memorySchema.table('events', {

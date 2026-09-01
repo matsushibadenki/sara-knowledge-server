@@ -17,6 +17,7 @@ import {
   memoryEntities,
   memoryEntityAliases,
   memoryEventIngestionBatches,
+  memoryEventIngestionJobs,
   memoryEvents,
   memoryExperiences,
   memoryRelationEvidence,
@@ -62,6 +63,7 @@ const createdMemoryConceptIds = [];
 const createdMemoryEntityIds = [];
 const createdMemoryEventIds = [];
 const createdMemoryBatchIds = [];
+const createdMemoryJobIds = [];
 const createdMemoryExperienceIds = [];
 const createdMemoryRelationIds = [];
 const createdMemoryAliasIds = [];
@@ -118,6 +120,9 @@ afterAll(async () => {
   }
   if (createdMemoryEventIds.length > 0) {
     await db.delete(memoryEvents).where(inArray(memoryEvents.id, createdMemoryEventIds));
+  }
+  if (createdMemoryJobIds.length > 0) {
+    await db.delete(memoryEventIngestionJobs).where(inArray(memoryEventIngestionJobs.id, createdMemoryJobIds));
   }
   if (createdMemoryBatchIds.length > 0) {
     await db.delete(memoryEventIngestionBatches).where(inArray(memoryEventIngestionBatches.id, createdMemoryBatchIds));
@@ -1061,6 +1066,65 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   });
   expect(tamperedSignature.response.status).toBe(401);
   expect(tamperedSignature.body.error.code).toBe('HMAC_SIGNATURE_INVALID');
+
+  const asyncBatchUid = `async-events-${crypto.randomUUID()}`;
+  const asyncEvents = Array.from({ length: 501 }, (_, index) => ({
+    event_uid: `async-event-${crypto.randomUUID()}`,
+    source_id: sourceId,
+    experience_id: experience.body.data.id,
+    occurred_at: new Date(Date.parse('2026-08-31T04:00:00Z') + index * 1000).toISOString(),
+    sequence_time: index,
+    modality: 'state', event_type: 'observation', symbol: `async-${index}`,
+    payload: { index }, proposal_source: 'rule', verification_state: 'candidate',
+  }));
+  const asyncEventBody = JSON.stringify({ batch_uid: asyncBatchUid, events: asyncEvents });
+  const asyncEventJob = await request('/api/v1/memory/events/async', {
+    method: 'POST', headers, body: asyncEventBody,
+  });
+  expect(asyncEventJob.response.status).toBe(202);
+  expect(asyncEventJob.body.data.status).toBe('queued');
+  expect(asyncEventJob.body.data.event_count).toBe(501);
+  createdMemoryJobIds.push(asyncEventJob.body.data.id);
+  const [storedAsyncJob] = await db.select({ objectKey: memoryEventIngestionJobs.objectKey })
+    .from(memoryEventIngestionJobs).where(eq(memoryEventIngestionJobs.id, asyncEventJob.body.data.id));
+  createdObjectKeys.push(storedAsyncJob.objectKey);
+
+  const asyncEventReplay = await request('/api/v1/memory/events/async', {
+    method: 'POST', headers, body: asyncEventBody,
+  });
+  expect(asyncEventReplay.response.status).toBe(200);
+  expect(asyncEventReplay.body.meta.replayed).toBe(true);
+  expect(asyncEventReplay.body.data.id).toBe(asyncEventJob.body.data.id);
+
+  let asyncEventDetail;
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    asyncEventDetail = await request(`/api/v1/memory/event-jobs/${asyncEventJob.body.data.id}`, { headers });
+    if (['completed', 'failed', 'cancelled'].includes(asyncEventDetail.body.data.status)) break;
+    await Bun.sleep(100);
+  }
+  expect(asyncEventDetail.body.data.status).toBe('completed');
+  expect(asyncEventDetail.body.data.processed_count).toBe(501);
+  expect(asyncEventDetail.body.data.ingestion_batch_id).not.toBeNull();
+  createdMemoryBatchIds.push(asyncEventDetail.body.data.ingestion_batch_id);
+  const asyncCreatedEvents = await db.select({ id: memoryEvents.id }).from(memoryEvents)
+    .where(eq(memoryEvents.ingestionBatchId, asyncEventDetail.body.data.ingestion_batch_id));
+  expect(asyncCreatedEvents).toHaveLength(501);
+  createdMemoryEventIds.push(...asyncCreatedEvents.map((event) => event.id));
+
+  const completedEventCancel = await request(`/api/v1/memory/event-jobs/${asyncEventJob.body.data.id}/cancel`, {
+    method: 'POST', headers,
+  });
+  expect(completedEventCancel.response.status).toBe(409);
+  expect(completedEventCancel.body.error.code).toBe('JOB_NOT_CANCELLABLE');
+
+  const changedAsyncEvents = [...asyncEvents];
+  changedAsyncEvents[0] = { ...changedAsyncEvents[0], symbol: 'changed-async' };
+  const changedAsyncBatch = await request('/api/v1/memory/events/async', {
+    method: 'POST', headers,
+    body: JSON.stringify({ batch_uid: asyncBatchUid, events: changedAsyncEvents }),
+  });
+  expect(changedAsyncBatch.response.status).toBe(409);
+  expect(changedAsyncBatch.body.error.code).toBe('BATCH_UID_CONFLICT');
 
   const invalidSourceEntity = await request('/api/v1/memory/entities', {
     method: 'POST', headers,

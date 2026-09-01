@@ -104,5 +104,6 @@ POST /api/v1/memory/verification/:type/:id
 - [Done] verification stateの直接PATCH禁止
 - [Done] Bulk Event ingestion・bounded graph traversal
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
-- [Next] Queue-backed asynchronous Event ingestion for batches over 500
+- [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
+- [Next] Asset API・upload authorization・provenance binding
 - [Later] confidence calibration、独立Source集計、合議レビュー

@@ -87,6 +87,15 @@ async function claimExport() {
   });
 }
 
+async function claimMemoryEvents() {
+  return sql.begin(async (tx) => {
+    const [job] = await tx`SELECT * FROM memory.event_ingestion_jobs WHERE status='queued' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`;
+    if (!job) return null;
+    const [claimed] = await tx`UPDATE memory.event_ingestion_jobs SET status='processing', worker_id=${workerId}, started_at=now() WHERE id=${job.id} RETURNING *`;
+    return claimed;
+  });
+}
+
 async function isCancelled(type, id) {
   const [row] = type === 'import'
     ? await sql`SELECT cancel_requested FROM dataset.import_jobs WHERE id=${id}`
@@ -167,11 +176,59 @@ async function processExport(job) {
   }
 }
 
+async function processMemoryEvents(job) {
+  try {
+    const [state] = await sql`SELECT cancel_requested FROM memory.event_ingestion_jobs WHERE id=${job.id}`;
+    if (state?.cancel_requested) {
+      await sql`UPDATE memory.event_ingestion_jobs SET status='cancelled', completed_at=now() WHERE id=${job.id}`;
+      return;
+    }
+    const parsed = JSON.parse(await s3.file(job.object_key).text());
+    const events = parsed?.events;
+    if (!Array.isArray(events) || events.length !== job.event_count || events.length < 501 || events.length > 10000) {
+      throw new Error('Stored Event batch count is invalid.');
+    }
+    const batchId = crypto.randomUUID();
+    const now = new Date();
+    await sql.begin(async (tx) => {
+      await tx`INSERT INTO memory.event_ingestion_batches (id,batch_uid,content_hash,event_count,created_by,created_at) VALUES (${batchId},${job.batch_uid},${job.content_hash},${events.length},${job.created_by},${now})`;
+      const rows = events.map((event, index) => ({
+        id: crypto.randomUUID(), event_uid: event.event_uid,
+        source_id: event.source_id ?? null, experience_id: event.experience_id ?? null,
+        ingestion_batch_id: batchId, batch_position: index + 1,
+        occurred_at: event.occurred_at ?? null, sequence_time: event.sequence_time ?? null,
+        duration: event.duration ?? null, modality: event.modality, channel: event.channel ?? null,
+        event_type: event.event_type, symbol: event.symbol ?? null,
+        payload: tx.json(event.payload ?? {}), state_before: event.state_before == null ? null : tx.json(event.state_before),
+        state_after: event.state_after == null ? null : tx.json(event.state_after),
+        reward: event.reward ?? 0, prediction_error: event.prediction_error ?? 0,
+        confidence: event.confidence ?? 1, quality_score: event.quality_score ?? 0.5,
+        proposal_source: event.proposal_source, extractor_name: event.extractor_name ?? null,
+        extractor_version: event.extractor_version ?? null,
+        verification_state: event.verification_state ?? 'unverified', source_hash: event.source_hash ?? null,
+        novelty: event.novelty ?? 0, priority_score: event.priority_score ?? 0,
+        metadata: tx.json(event.metadata ?? {}), created_by: job.created_by,
+        created_at: now, updated_at: now, deleted_at: null,
+      }));
+      await tx`INSERT INTO memory.events ${tx(rows,
+        'id', 'event_uid', 'source_id', 'experience_id', 'ingestion_batch_id', 'batch_position',
+        'occurred_at', 'sequence_time', 'duration', 'modality', 'channel', 'event_type', 'symbol',
+        'payload', 'state_before', 'state_after', 'reward', 'prediction_error', 'confidence',
+        'quality_score', 'proposal_source', 'extractor_name', 'extractor_version', 'verification_state',
+        'source_hash', 'novelty', 'priority_score', 'metadata', 'created_by', 'created_at', 'updated_at', 'deleted_at')}`;
+      await tx`UPDATE memory.event_ingestion_jobs SET status='completed', processed_count=${events.length}, ingestion_batch_id=${batchId}, completed_at=now() WHERE id=${job.id}`;
+    });
+  } catch (error) {
+    await sql`UPDATE memory.event_ingestion_jobs SET status='failed', error_message=${String(error.message || error).slice(0, 2000)}, completed_at=now() WHERE id=${job.id}`;
+  }
+}
+
 async function run() {
   console.log(JSON.stringify({ level: 'info', service: 'worker', message: 'Background worker started', worker_id: workerId }));
   try {
     await sql`UPDATE dataset.import_jobs SET status='queued', worker_id=NULL, started_at=NULL WHERE mode='async' AND status='processing' AND started_at < now() - interval '5 minutes'`;
     await sql`UPDATE dataset.export_jobs SET status='queued', worker_id=NULL, started_at=NULL WHERE mode='async' AND status='processing' AND started_at < now() - interval '5 minutes'`;
+    await sql`UPDATE memory.event_ingestion_jobs SET status='queued', worker_id=NULL, started_at=NULL WHERE status='processing' AND started_at < now() - interval '5 minutes'`;
   } catch (error) {
     console.error(JSON.stringify({ level: 'warn', service: 'worker', message: 'Queue recovery deferred until migrations are available', error: error.message }));
   }
@@ -182,6 +239,8 @@ async function run() {
       if (importJob) { await processImport(importJob); continue; }
       const exportJob = await claimExport();
       if (exportJob) { await processExport(exportJob); continue; }
+      const memoryEventJob = await claimMemoryEvents();
+      if (memoryEventJob) { await processMemoryEvents(memoryEventJob); continue; }
     } catch (error) {
       console.error(JSON.stringify({ level: 'error', service: 'worker', message: error.message }));
     }

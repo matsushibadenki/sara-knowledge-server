@@ -20,6 +20,8 @@
 
 ## 現在の主要ドキュメント
 
+- `async-event-ingestion.md`: 501〜10,000 Eventの非同期・原子的取り込み
+- `async-event-ingestion-progress-2026-09-01.md`: 非同期Event節目の実装・検証記録
 - `signed-worker-ingestion.md`: 外部WorkerのHMAC署名、nonce、冪等再送、配置境界
 - `signed-worker-ingestion-progress-2026-08-31.md`: 署名取り込み節目の実装・検証記録
 - `bulk-event-and-bounded-traversal.md`: 原子的Bulk Event取り込み、制限付き探索、外部Worker境界
