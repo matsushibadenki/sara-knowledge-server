@@ -40,6 +40,12 @@ WordPressや管理画面は入力・編集クライアントです。知識、�
 
 Recordの更新では既存Versionを上書きせず、新しいVersionを追加します。削除も原則として論理削除とし、修正前の内容へ戻れるようにします。
 
+### データ件数ではなく知識空間への寄与を測る
+
+Knowledge ServerをData Refineryとして発展させ、Source、Canonical Knowledge、Training Material、Dataset Build、Training Impactを分離します。品質、新規性、Coverage、矛盾、Information Gain、training eligibilityは固定属性ではなく、対象モデル・taxonomy・Dataset Snapshot・評価時点に対する版付きAssessmentとして扱います。
+
+原文から学習・評価までの変換系譜をDAGで追跡し、高スコア化そのものではなく、同じ計算予算でのheld-out評価改善によって価値を検証します。
+
 ### 候補と確定知識を分離する
 
 LLM、ルール、SARA、RISAが生成した概念・関係・推論は、生成直後には事実として扱いません。生成元、エンジンのバージョン、証拠、反例、文脈、検証状態を保持し、承認後のみ確定知識へ昇格させます。

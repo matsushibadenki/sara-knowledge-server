@@ -82,6 +82,12 @@
 - [Later] RISA / SARA Engine連携
 - [Later] WordPress signed sync adapter、差分同期、障害再送
 - [Later] ベクトル検索、価値駆動学習、Research Queue
+- [Later] Data Refinery DR-0：評価軸・taxonomy version・score policy・比較baseline
+- [Later] Data Refinery DR-1：追記型Assessment・SourceからTraining Runまでの変換系譜DAG
+- [Later] Data Refinery DR-2：Coverage cell・Gap検出・推定Information Gain・Research Queue
+- [Later] Data Refinery DR-3：Claim Cluster・文脈／時点付き矛盾管理・合意度
+- [Later] Data Refinery DR-4：Training Material版管理・policy依存eligibility・curriculum build
+- [Later] Data Refinery DR-5：Impact Card・予測価値とTraining Run実測効果の較正
 - [Later] フィードバック駆動の構造更新と予測誤差の監査
 - [Later] 構造パターン・適用事例・類似構造のMemory Schema
 - [Later] Structure snapshot・型付きDelta・checkpointのMemory Schema

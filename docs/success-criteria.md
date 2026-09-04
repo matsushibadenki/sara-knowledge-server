@@ -159,6 +159,11 @@ SARAや他のAIがKnowledge Serverを使うことで、モデル単体や通常�
 - 矛盾検出率
 - 重複検出率
 - 評価済みデータ率
+- 原文からDataset Snapshotまでのlineage完全率
+- taxonomy版ごとの知識空間coverageと不足cell減少率
+- 同じ役割を持つデータの冗長率
+- 文脈・時点付きClaim Clusterへ整理された矛盾の割合
+- policy依存training eligibilityの理由説明率
 
 ### AIへの効果
 
@@ -193,6 +198,10 @@ SARAや他のAIがKnowledge Serverを使うことで、モデル単体や通常�
 - hard negativeの誤共有率
 - Factor applicability profileの較正誤差
 - alignmentずれとdataset leakageへの耐性
+- 推定Information Gainと実測評価利得の較正誤差
+- 同一計算予算でのrandom／quality-only／value-driven選定の性能差
+- curriculum順序あり／なしの学習効率差
+- Dataset Snapshotから原文・権利・変換器版への復元成功率
 
 ## 比較評価
 

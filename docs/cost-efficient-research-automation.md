@@ -190,6 +190,8 @@ Knowledge Serverが、研究者が次に確認すべき課題を自動抽出す�
 
 実装時には、0除算、スコアの偏り、人気データへの過集中、品質と利用頻度の混同に注意する。まずは説明可能な個別要素と計算結果を保存し、後から重みを変更できるようにする。
 
+さらに、価値はRecord固有の固定値ではなく、対象モデル、Dataset Snapshot、taxonomy、評価時点に依存する。合成スコアだけを保存せず、Coverage、Novelty、Provenance、Contradiction、Lineage、Information Gain、Redundancyの各成分と評価器・方針の版を追記型で保持する。詳細は`data-refinery-and-information-gain.md`を参照する。
+
 価値スコアに基づき、次を振り分ける。
 
 ```text
@@ -213,10 +215,11 @@ Knowledge Serverが、研究者が次に確認すべき課題を自動抽出す�
 - 自動処理から承認へ到達する割合
 - AI間レビューの一致率と人間修正率
 - 価値スコア上位データの性能寄与
+- 予測Information GainとTraining Run後の実測利得の較正
+- Dataset Buildのlineage完全率と再現成功率
 - 夜間バッチの処理量と失敗率
 - 研究者がResearch Queueで解決した課題数
 
 ## SARAの差別化
 
 SARAの競争力を、巨大Transformerを直接上回ることだけに置かない。GPUが少なくても、昨日までの知識・経験・評価が翌日に継続利用され、研究者の作業を減らしながら知識資産が成長する「知識を捨てないAI開発環境」を目指す。
-
