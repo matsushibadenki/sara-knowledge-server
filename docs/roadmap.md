@@ -1,118 +1,99 @@
 # Roadmap
 
-## Phase 1: 基盤
+更新: 2026-09-05。[設計評価と方針](database-direction-review-2026-09-05.md)に基づく。進捗と実装順序の正本は本書。過去のprogress文書と[改訂前の全項目](roadmap-archive-2026-09-05.md)は履歴であり、そこにあるNextは現在の着手指示ではない。
 
-- [Done] monorepoの初期構成
-- [Done] Docker Composeサービス定義
-- [Done] PostgreSQL + pgvector + pgcrypto + pg_trgm + unaccent + citext
-- [Done] Redis
-- [Done] MinIOと初期バケット作成
-- [Done] Mailpit
-- [Done] Bun + Hono API skeleton
-- [Done] Next.js管理画面 skeleton
-- [Done] Worker skeleton
-- [Done] API liveness / health / readinessの入口
-- [Done] OpenAPI skeleton
-- [Done] Bun APIの基本テスト
-- [Done] READMEと環境設定例
+- `[Done]` implemented in the current codebase
+- `[Next]` high-priority unfinished work
+- `[Later]` planned, but not the closest next step
 
-## 次の実装
+Doneは機能の存在を示し、本番品質・全経路の正しさを保証しない。今回の確認は基本テスト9 pass、統合テスト1 skip。各gateは以下の受け入れ試験を実行し、結果を保存するまで未完了とする。
 
-- [Done] Drizzle ORM、スキーマ、migration基盤
-- [Done] `auth.users`、`dataset.sources`、`dataset.records`、`dataset.record_versions`の初期テーブル
-- [Done] `auth.users` の管理者seed
-- [Done] ログイン、JWTアクセストークン、認証middleware
-- [Done] Refresh TokenのDB保存・ローテーション・logout
-- [Done] APIキーの発行・一覧・失効・scope保存
-- [Done] APIキーによるリクエスト認証とscope認可
-- [Done] ロール認可とログイン試行回数制限
-- [Done] Source API、論理削除・復元、検索、scope認可
-- [Done] Recordの出典関連付け、参照先検証、削除後のprovenance保持
-- [Done] Record CRUD、版履歴、論理削除、復元
-- [Done] Record現在版の外部キー・版番号一意制約・同時更新制御
-- [Done] Record / Version / Refresh Token / APIキーの初期インデックス
-- [Done] Source種別のDB制約とSource検索用インデックス
-- [Done] APIのDB / Redis / MinIO readiness実接続確認
-- [Done] 許可Origin方式のCORS
-- [Done] 管理画面skeletonの日本語・英語・简体中文表示
-- [Done] lockfile固定のDocker build
-- [Done] Source・Record変更の同一トランザクション監査
-- [Done] admin専用監査一覧・詳細APIとrequest ID相関
+## 製品目標
 
-## 将来の実装
+**根拠・版・検証・訂正・学習利用履歴を一貫して扱うAI向け知識DB。** PostgreSQLを保存エンジンとして維持する。最初は単一組織内のworkspace共有を対象に、製品仕様・運用手順の訂正を2種類のクライアントへ反映できることを実証する。汎用DBエンジンやSNN／RISAの研究成功を初期製品の要件にしない。
 
-- [Done] アノテーション・タグ・評価の最小スキーマとレビュー入口
-- [Done] レビュー申請・承認・拒否・修正要求の監査
-- [Done] JSONL / JSON / CSV同期インポート・エクスポート
-- [Done] Import原文・checksum・行別結果・冪等キー・部分成功
-- [Done] MinIO原本保管とWorkerによる大容量非同期Import／Export
-- [Done] Redis通知、SKIP LOCKED claim、chunk進捗、取消、stale Job再開
-- [Done] 再利用可能なDataset Definition・不変Snapshot・学習用manifest生成
-- [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
-- [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
-- [Done] Relation Evidence・Entity Alias・候補検証フロー
-- [Done] Bulk Event ingestion・bounded graph traversal
-- [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
-- [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
-- [Done] Asset API・upload authorization・provenance binding
-- [Next] Asset processing jobs・media metadata extraction・derived-Asset provenance
-- [Later] Staging tableを使う10,000件超のEvent ingestion
-- [Later] login・APIキー・Import／Exportの監査拡張
-- [Later] 監査DB role分離、tamper evidence、保存期間・partition
-- [Later] Dataset split・大規模非同期build・モデル別変換器
-- [Later] checkpoint／artifact詳細、Run比較、trainer callback認証
-- [Later] confidence calibration、独立Source集計、合議レビュー
-- [Later] Embedding、Activation、Replay
-- [Later] Fractal Canopy FC-0〜FC-1：compute-matched dense／MoD／flat MoEとの固定階層routing比較
-- [Later] Fractal Canopy FC-2：branch drop-path、浅深subpath、calibrated early exit
-- [Later] Fractal Canopy FC-3：予測利得と計算costに基づくbranch growth／inactive pruning
-- [Later] Fractal Canopy FC-4〜FC-5：budget付きcross-link、RISA共有Unit、routing履歴保存
-- [Later] HLC-0〜HLC-1：Backprop oracle付きhierarchical local credit benchmark／ablation
-- [Later] HLC-2：delayed reward、eligibility trace、replayによる長期credit
-- [Later] HLC-3：weight learning＋branch growth＋reversible inactive pruning
-- [Later] HLC-4：Fractal Canopy／SNNのactive-path credit assignment
-- [Later] ICP-0〜ICP-1：Dendritic Local Unit／Soma Unitとnetwork内蔵local learning
-- [Later] ICP-2：Canopyを事前設計しないgrowth／reversible inactive pruning
-- [Later] ICP-3：Unit・Circuit・Module間で反復するalgorithmic self-similarity
-- [Later] ICP-4〜ICP-5：recurrence、複数時間scale、online continual learning
-- [Later] SNN-L0〜L1：point／multi-branch、chain／tree、local causal credit比較
-- [Later] SNN-L2：fast／medium trace＋Event Memoryによるdelayed-credit benchmark
-- [Later] SNN-L3〜L4：構造可塑性、branch再利用、online continual learning
-- [Later] SNN-L5：surrogate-gradient SNNを含むgate付きlong-sequence拡張
-- [Later] RISA / SARA Engine連携
-- [Later] WordPress signed sync adapter、差分同期、障害再送
-- [Later] ベクトル検索、価値駆動学習、Research Queue
-- [Later] Data Refinery DR-0：評価軸・taxonomy version・score policy・比較baseline
-- [Later] Data Refinery DR-1：追記型Assessment・SourceからTraining Runまでの変換系譜DAG
-- [Later] Data Refinery DR-2：Coverage cell・Gap検出・推定Information Gain・Research Queue
-- [Later] Data Refinery DR-3：Claim Cluster・文脈／時点付き矛盾管理・合意度
-- [Later] Data Refinery DR-4：Training Material版管理・policy依存eligibility・curriculum build
-- [Later] Data Refinery DR-5：Impact Card・予測価値とTraining Run実測効果の較正
-- [Later] フィードバック駆動の構造更新と予測誤差の監査
-- [Later] 構造パターン・適用事例・類似構造のMemory Schema
-- [Later] Structure snapshot・型付きDelta・checkpointのMemory Schema
-- [Later] 類似DeltaからTransformation Patternを抽出
-- [Later] MDLによる基底構造・差分・例外の表現比較
-- [Later] 構造共有による未知relation候補生成とheld-out評価
-- [Later] Structural Factorization用toy domainとheld-out composition benchmark
-- [Later] 人間定義Primitiveと学習Factorによる分解・再構成baseline比較
-- [Later] top-k分解候補と制約付きFactor／Transformation合成探索
-- [Later] 構造合成推論と検索・RAG・graph traversal・LLMの比較
-- [Later] 10³→10⁵→10⁷ Factor候補の段階的scale試験
-- [Later] Factorization・Composition Proposal・Reasoning TraceのMemory Schema
-- [Later] 共通潜在過程を文章・animation・音記号・触覚時系列へ描画するtoy dataset
-- [Later] native値・modality固有構造・cross-modal Factor・residualの最小表現
-- [Later] modality別・shared Embedding・typed Factorのcross-modal baseline比較
-- [Later] held-out modality pair・hard negative・alignmentずれ・leakage耐性評価
-- [Later] Factor applicability profileとcross-modal transfer evaluation
-- [Later] alignment・modality binding・transfer履歴のMemory Schema
-- [Later] 局所Unit再利用・residual・Assembly形成の自己組織化プロトタイプ
-- [Later] 名前のないlatent Unitの安定性・予測利得・交絡耐性評価
-- [Later] 自己組織化共有表現から監査用Structure／Deltaへの投影
-- [Later] 予測誤差・競合・恒常性による構造Stability Profile
-- [Later] Event Memoryからのsandbox Replayと段階的consolidation
-- [Later] 力学的検証とLLM Verifierの精度・費用比較
-- [Later] Spectral NeuronをStability／Value scorerとして単純baselineと比較
-- [Later] eigengap・基底不変量によるlatent表現の説明安定性評価
-- [Later] top-k局所波及、減衰、導出履歴、回帰時取消
-- [Later] バックアップ、復元、監査、負荷試験、本番化
+English: Prove a revision-aware knowledge database with traceable evidence and corrections before expanding research features.
+
+简体中文：先验证版本、证据和更正机制完整的知识数据库，再扩展研究功能。
+
+## 既存の実装資産
+
+- [Done] monorepo、Bun + Hono、Next.js三言語skeleton、Docker Compose、固定lockfile build
+- [Done] PostgreSQL + 拡張、Drizzle schema／migration、Redis、MinIO、Mailpit
+- [Done] JWT、Refresh rotation、API key scope、ロール、ログイン試行制限、CORS、readiness
+- [Done] Source／Record CRUD、Record本文Version・競合検出・論理削除／復元
+- [Done] Source／Record変更の同一transaction監査、admin監査API
+- [Done] Tag／Annotation／Evaluation、Version固定レビューの入口
+- [Done] JSON／JSONL／CSV同期・非同期Import／Export、原本・hash・行別結果・冪等キー
+- [Done] WorkerのSKIP LOCKED claim、chunk進捗、取消、起動時stale Job再開
+- [Done] Dataset Definition、不変Snapshotメンバー、manifest、Training Run／Metric
+- [Done] Event／Experience／Entity／Concept／Relation、Alias／Evidence／Verification API
+- [Done] Bulk Event、bounded traversal、HMAC／nonce、501〜10,000 Event非同期取り込み
+- [Done] Asset upload予約、署名URL、complete時hash検証、provenance binding
+
+## G0 — 整合性と実装契約の修復（現在の着手対象）
+
+- [Next] **G0.1 参照とアクセス境界:** MemoryのRecord参照を`ownerId`へ対応させる。共有Record／Sourceと所有者限定Memoryの権限表を決定し、workspace membershipへ移行する。作者とアクセス境界を分離する。
+- [Next] **G0.2 承認と内容:** 一般POST／PATCH／同期Import／Workerからapprovedを直接確定しない。更新版を未承認に戻す。Memoryにrevision競合制御を追加し、Decisionと内容版を固定する。
+- [Next] **G0.3 共有実装と試験:** domain service／入力schemaをAPIとWorkerで共有する。巨大な統合ケースを責務別に分け、一時DBへのmigrationと実Worker統合試験をCIで必須化する。
+- [Next] **G0.4 ジョブ復旧:** lease／heartbeat／claim世代、世代条件付き確定、定期reaper、retry上限を導入。Redis停止でもDB pollingを継続し、Job種別の飢餓を防ぐ。
+- [Next] **G0.5 Asset確定と保全:** 一時uploadと確定版を分離。参照保持、再試行可能な削除Job、孤立object照合、DB＋object backup／restore手順を追加する。
+
+順序はG0.1 → G0.2 → G0.3 → G0.4 → G0.5。各修正に必要な回帰試験はその修正と同時に追加し、G0.3まで延期しない。既存データの変更前にbackupと復元確認を行う。
+
+**完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。長時間Job中の別Worker起動、旧claimの遅延完了、Redis停止、途中kill、再PUT・object削除失敗を試し、重複効果と不正なcompletedを0件にする。別環境へDB＋objectを復元して参照とhashが一致する。これらは現時点では未達。
+
+## G1 — 訂正できる知識モデル（G0完了後）
+
+- [Later] Source revision、Memory revision、Recordの解釈に必要な属性と出典版の固定
+- [Later] Evidence／Decisionを対象revisionに固定し、独立Sourceと重複証拠を区別
+- [Later] valid time／recorded time、supersedes／retraction、文脈付き矛盾の最小表現
+- [Later] 依存関係とtransactional outbox、stale判定、再検証Job、取消の利用trace
+- [Later] 不変Snapshotの影響表示、Source／Asset／policy版を含む再現bundle
+
+**完了条件:** v1根拠からRelationとDataset／Runを作り、v2訂正・撤回で依存先を識別できる。新しいstrict利用では古い依存先を除外し、過去Snapshotはv1利用を説明できる。過去状態が復元不能な既存データを推測で補完せず明示する。変更元→依存先の完全な再構築試験を保存する。
+
+## G2 — 検索と利用による価値実証（G1完了後）
+
+- [Later] 三言語の字句検索baseline、cursor pagination、候補／確定知識の検索契約
+- [Later] chunk／EmbeddingをRecord revision・encoder版へ固定。pgvector検索＋字句検索の比較
+- [Later] bounded traversalの省略理由・上限・タイムアウト、必要な根拠を返すretrieval API
+- [Later] API schema／response／errorのOpenAPI契約と、回答context取得・学習bundle取得の2クライアント
+- [Later] 最小の検索・出典・差分・レビュー画面を日本語／English／简体中文で実装
+- [Later] 訂正・撤回・時点・権限・矛盾を含む固定評価セットと比較レポート
+
+**完了条件:** [成功基準](success-criteria.md)のG2指標を実測する。同じコーパス・モデル・予算で、PostgreSQL + pgvectorの単純RAGと比較する。Graphitiも可能な同条件で比較し、動かしていない構成を順位付けしない。検索index再構築中でも厳格な読取から失効知識が漏れない。
+
+## G3 — 限定本番pilot（G2の価値実証後）
+
+- [Later] 10⁴ → 10⁵ Record／Relationの段階負荷試験、更新中検索、Job待ち時間、storage増加量の記録
+- [Later] DB最小権限、監査対象の不足、監査保持期間、restore drill、migration切戻し、運用指標
+- [Later] XServer VPS Cloudの拡張・接続・backup能力検証。App VPS + Managed PostgreSQL + NFSと通常VPS WorkerのHTTPS境界を実装
+- [Later] object保管方式を確定。NFSをbackupやS3 APIの代替とみなさない
+- [Later] 独立した利用者2名以上による2週間のpilotと、導入・訂正・調査時間の測定
+- [Later] 配布ライセンス、外部データ利用条件、削除・撤回・保持policyの確定
+
+**完了条件:** 固定環境のSLOと復元目標を満たし、利用者が訂正・根拠追跡を継続利用する。費用、障害時対応、制限を明文化する。利点がなければ保存API／データ管理基盤へ範囲を縮小し、独自DBとしての機能拡張を止める。
+
+## G4 — 実証後に選ぶ拡張
+
+- [Later] Asset processing、media metadata抽出、derived-Asset lineage（旧Nextから移動）
+- [Later] 10,000件超Eventのstaging、streaming Import／Export、大規模非同期Snapshot／split
+- [Later] WordPress差分同期・再送、trainer callback、Run比較・checkpoint詳細
+- [Later] Data Refineryの版付きAssessment・権利／用途別eligibility。Coverage／Information Gainは単純選定より改善した場合に採用
+- [Later] 複数組織SaaS、RLS等の防御追加、partition／分散化は測定された必要性に基づく
+
+## 研究track — DBのリリースから独立
+
+- [Later] Structure／Delta／Transformation、構造共有・未知関係生成、factorization／composition
+- [Later] cross-modal Factor、自己組織化Unit／Assembly、Stability／Replay、Spectral scorer
+- [Later] Fractal Canopy FC-0〜5、HLC-0〜4、ICP-0〜5、SNN-L0〜5、RISA／SARA Engine
+
+詳細な個別項目と段階名は[旧roadmap](roadmap-archive-2026-09-05.md)および各研究文書を保持する。研究ごとに一つの仮説、単純baseline、held-out分割、計算予算、失敗条件を事前固定する。toy experimentで価値が出る前に本番schemaを追加しない。研究が失敗してもG0〜G3は成立する構成を維持する。
+
+## 進捗更新のルール
+
+1. Nextは現在着手するgateの未完了項目だけに付ける。後段は依存gateが完了してからNextへ移す。
+2. Doneへ移す際は、変更・migration・試験コマンド・結果・残る制限をprogress文書へ記録する。
+3. API数やtable数を成果指標にしない。正しい訂正、根拠の再現、利用者の工数削減を評価する。
+4. 各gateで続行／範囲縮小を決定する。未達のまま研究機能追加で成果を代替しない。

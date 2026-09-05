@@ -1,0 +1,122 @@
+# 2026-09-05 改訂前のRoadmap（履歴）
+
+この文書は改訂前の計画を保存した履歴です。実装順序・進捗の正本は[現行Roadmap](roadmap.md)です。以下の `[Next]` は当時の表示であり、現在の着手指示ではありません。研究項目は削除せず保持しています。
+
+# Roadmap
+
+## Phase 1: 基盤
+
+- [Done] monorepoの初期構成
+- [Done] Docker Composeサービス定義
+- [Done] PostgreSQL + pgvector + pgcrypto + pg_trgm + unaccent + citext
+- [Done] Redis
+- [Done] MinIOと初期バケット作成
+- [Done] Mailpit
+- [Done] Bun + Hono API skeleton
+- [Done] Next.js管理画面 skeleton
+- [Done] Worker skeleton
+- [Done] API liveness / health / readinessの入口
+- [Done] OpenAPI skeleton
+- [Done] Bun APIの基本テスト
+- [Done] READMEと環境設定例
+
+## 次の実装
+
+- [Done] Drizzle ORM、スキーマ、migration基盤
+- [Done] `auth.users`、`dataset.sources`、`dataset.records`、`dataset.record_versions`の初期テーブル
+- [Done] `auth.users` の管理者seed
+- [Done] ログイン、JWTアクセストークン、認証middleware
+- [Done] Refresh TokenのDB保存・ローテーション・logout
+- [Done] APIキーの発行・一覧・失効・scope保存
+- [Done] APIキーによるリクエスト認証とscope認可
+- [Done] ロール認可とログイン試行回数制限
+- [Done] Source API、論理削除・復元、検索、scope認可
+- [Done] Recordの出典関連付け、参照先検証、削除後のprovenance保持
+- [Done] Record CRUD、版履歴、論理削除、復元
+- [Done] Record現在版の外部キー・版番号一意制約・同時更新制御
+- [Done] Record / Version / Refresh Token / APIキーの初期インデックス
+- [Done] Source種別のDB制約とSource検索用インデックス
+- [Done] APIのDB / Redis / MinIO readiness実接続確認
+- [Done] 許可Origin方式のCORS
+- [Done] 管理画面skeletonの日本語・英語・简体中文表示
+- [Done] lockfile固定のDocker build
+- [Done] Source・Record変更の同一トランザクション監査
+- [Done] admin専用監査一覧・詳細APIとrequest ID相関
+
+## 将来の実装
+
+- [Done] アノテーション・タグ・評価の最小スキーマとレビュー入口
+- [Done] レビュー申請・承認・拒否・修正要求の監査
+- [Done] JSONL / JSON / CSV同期インポート・エクスポート
+- [Done] Import原文・checksum・行別結果・冪等キー・部分成功
+- [Done] MinIO原本保管とWorkerによる大容量非同期Import／Export
+- [Done] Redis通知、SKIP LOCKED claim、chunk進捗、取消、stale Job再開
+- [Done] 再利用可能なDataset Definition・不変Snapshot・学習用manifest生成
+- [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
+- [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
+- [Done] Relation Evidence・Entity Alias・候補検証フロー
+- [Done] Bulk Event ingestion・bounded graph traversal
+- [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
+- [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
+- [Done] Asset API・upload authorization・provenance binding
+- [Next] Asset processing jobs・media metadata extraction・derived-Asset provenance
+- [Later] Staging tableを使う10,000件超のEvent ingestion
+- [Later] login・APIキー・Import／Exportの監査拡張
+- [Later] 監査DB role分離、tamper evidence、保存期間・partition
+- [Later] Dataset split・大規模非同期build・モデル別変換器
+- [Later] checkpoint／artifact詳細、Run比較、trainer callback認証
+- [Later] confidence calibration、独立Source集計、合議レビュー
+- [Later] Embedding、Activation、Replay
+- [Later] Fractal Canopy FC-0〜FC-1：compute-matched dense／MoD／flat MoEとの固定階層routing比較
+- [Later] Fractal Canopy FC-2：branch drop-path、浅深subpath、calibrated early exit
+- [Later] Fractal Canopy FC-3：予測利得と計算costに基づくbranch growth／inactive pruning
+- [Later] Fractal Canopy FC-4〜FC-5：budget付きcross-link、RISA共有Unit、routing履歴保存
+- [Later] HLC-0〜HLC-1：Backprop oracle付きhierarchical local credit benchmark／ablation
+- [Later] HLC-2：delayed reward、eligibility trace、replayによる長期credit
+- [Later] HLC-3：weight learning＋branch growth＋reversible inactive pruning
+- [Later] HLC-4：Fractal Canopy／SNNのactive-path credit assignment
+- [Later] ICP-0〜ICP-1：Dendritic Local Unit／Soma Unitとnetwork内蔵local learning
+- [Later] ICP-2：Canopyを事前設計しないgrowth／reversible inactive pruning
+- [Later] ICP-3：Unit・Circuit・Module間で反復するalgorithmic self-similarity
+- [Later] ICP-4〜ICP-5：recurrence、複数時間scale、online continual learning
+- [Later] SNN-L0〜L1：point／multi-branch、chain／tree、local causal credit比較
+- [Later] SNN-L2：fast／medium trace＋Event Memoryによるdelayed-credit benchmark
+- [Later] SNN-L3〜L4：構造可塑性、branch再利用、online continual learning
+- [Later] SNN-L5：surrogate-gradient SNNを含むgate付きlong-sequence拡張
+- [Later] RISA / SARA Engine連携
+- [Later] WordPress signed sync adapter、差分同期、障害再送
+- [Later] ベクトル検索、価値駆動学習、Research Queue
+- [Later] Data Refinery DR-0：評価軸・taxonomy version・score policy・比較baseline
+- [Later] Data Refinery DR-1：追記型Assessment・SourceからTraining Runまでの変換系譜DAG
+- [Later] Data Refinery DR-2：Coverage cell・Gap検出・推定Information Gain・Research Queue
+- [Later] Data Refinery DR-3：Claim Cluster・文脈／時点付き矛盾管理・合意度
+- [Later] Data Refinery DR-4：Training Material版管理・policy依存eligibility・curriculum build
+- [Later] Data Refinery DR-5：Impact Card・予測価値とTraining Run実測効果の較正
+- [Later] フィードバック駆動の構造更新と予測誤差の監査
+- [Later] 構造パターン・適用事例・類似構造のMemory Schema
+- [Later] Structure snapshot・型付きDelta・checkpointのMemory Schema
+- [Later] 類似DeltaからTransformation Patternを抽出
+- [Later] MDLによる基底構造・差分・例外の表現比較
+- [Later] 構造共有による未知relation候補生成とheld-out評価
+- [Later] Structural Factorization用toy domainとheld-out composition benchmark
+- [Later] 人間定義Primitiveと学習Factorによる分解・再構成baseline比較
+- [Later] top-k分解候補と制約付きFactor／Transformation合成探索
+- [Later] 構造合成推論と検索・RAG・graph traversal・LLMの比較
+- [Later] 10³→10⁵→10⁷ Factor候補の段階的scale試験
+- [Later] Factorization・Composition Proposal・Reasoning TraceのMemory Schema
+- [Later] 共通潜在過程を文章・animation・音記号・触覚時系列へ描画するtoy dataset
+- [Later] native値・modality固有構造・cross-modal Factor・residualの最小表現
+- [Later] modality別・shared Embedding・typed Factorのcross-modal baseline比較
+- [Later] held-out modality pair・hard negative・alignmentずれ・leakage耐性評価
+- [Later] Factor applicability profileとcross-modal transfer evaluation
+- [Later] alignment・modality binding・transfer履歴のMemory Schema
+- [Later] 局所Unit再利用・residual・Assembly形成の自己組織化プロトタイプ
+- [Later] 名前のないlatent Unitの安定性・予測利得・交絡耐性評価
+- [Later] 自己組織化共有表現から監査用Structure／Deltaへの投影
+- [Later] 予測誤差・競合・恒常性による構造Stability Profile
+- [Later] Event Memoryからのsandbox Replayと段階的consolidation
+- [Later] 力学的検証とLLM Verifierの精度・費用比較
+- [Later] Spectral NeuronをStability／Value scorerとして単純baselineと比較
+- [Later] eigengap・基底不変量によるlatent表現の説明安定性評価
+- [Later] top-k局所波及、減衰、導出履歴、回帰時取消
+- [Later] バックアップ、復元、監査、負荷試験、本番化

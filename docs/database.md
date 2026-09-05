@@ -1,5 +1,7 @@
 # Database
 
+2026-09-05: 実装順序は[現行Roadmap](roadmap.md)、改訂方針は[設計評価](database-direction-review-2026-09-05.md)を参照する。以下は現行schemaの説明であり、Source／Memory／Evidenceの完全な版固定や本番復旧保証が実装済みという意味ではない。
+
 ## 現在の実装
 
 Drizzle ORM + postgres.jsを使用し、PostgreSQLを正本とする。
@@ -23,10 +25,13 @@ drizzle.__drizzle_migrations
 - `auth.users`
 - `auth.refresh_tokens`
 - `auth.api_keys`
+- `auth.api_request_nonces`
 
 ### `dataset`
 
 - `dataset.sources`
+- `dataset.assets`
+- `dataset.asset_bindings`
 - `dataset.records`
 - `dataset.record_versions`
 - `dataset.tags`
@@ -55,6 +60,8 @@ drizzle.__drizzle_migrations
 
 - `memory.experiences`
 - `memory.events`
+- `memory.event_ingestion_batches`
+- `memory.event_ingestion_jobs`
 - `memory.entities`
 - `memory.concepts`
 - `memory.relations`
@@ -100,7 +107,7 @@ PostgreSQLの初期化時と冪等migrationで以下を有効化する。既存v
 - 非同期Jobは`queued → processing → completed|failed|cancelled`で遷移する
 - Worker claim対象だけを含む部分索引を使用し、`FOR UPDATE SKIP LOCKED`で複数Workerの競合待ちを避ける
 - MinIO object key、worker ID、開始時刻、処理済み件数、取消要求をJobへ保存する
-- 5分以上古いprocessing JobはWorker起動時にqueuedへ戻し、既存Import Itemの最大行から再開する
+- 5分以上古いprocessing JobはWorker起動時にqueuedへ戻し、既存Import Itemの最大行から再開する。現実装にlease／heartbeat／claim世代はなく、稼働中Jobの誤回収防止はG0の修復対象
 - Dataset Definitionは再利用可能な抽出条件とmanifest形式を保持する
 - Dataset Snapshotは作成時点のDefinition revision、filter、Record Version、順序を固定する
 - Snapshot作成後にRecordの現在版やDefinitionを変更しても、既存Snapshotの構成は変更しない
@@ -119,7 +126,7 @@ PostgreSQLの初期化時と冪等migrationで以下を有効化する。既存v
 - Entity AliasはNFKC等で正規化し、Entity・language・normalized aliasを有効行内で一意にする
 - Relation Evidenceは追記型とし、追加とRelation count更新を同一トランザクションで行う
 - Verification Decisionは追記型とし、対象状態の条件付き更新と同一トランザクションで保存する
-- verification stateは通常PATCHで変更せず、`memory:verify`を持つreviewer/adminだけが遷移させる
+- verification stateの明示変更は通常PATCHで拒否し、検証専用APIを使う（JWTはreviewer/admin、API keyは`memory:verify` scope）。ただし内容変更時にも既存状態が残るため、内容版への検証固定はG0の修復対象
 
 ## コマンド
 
@@ -158,10 +165,12 @@ docker compose exec api bun run db:migrate
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
 - [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
 - [Done] Asset API・upload authorization・provenance binding
-- [Next] Asset processing jobs・media metadata extraction・derived-Asset provenance
+- [Next] Record参照とworkspace境界、承認／revision整合性の修復
+- [Next] Worker lease／claim世代、Asset確定・参照保持、backup／restore試験
+- [Later] Asset processing jobs・media metadata extraction・derived-Asset provenance
 
 ## 将来のMemory Schema
 
-Structure、型付きDelta、Transformation Pattern、自己組織化する共有Unit、力学的なStability ProfileとReplay履歴は設計採用済みだが、現在のmigrationにはまだ追加しない。Asset本体をobject storage、metadataとSource／Record／Event bindingをPostgreSQLで管理できる。次はmedia metadata抽出とderived Assetのprovenanceを実装する。
+Structure、型付きDelta、Transformation Pattern、自己組織化する共有Unit、力学的なStability ProfileとReplay履歴は研究候補として保持し、効果を確認するまで現在のmigrationには追加しない。Asset本体をobject storage、metadataとSource／Record／Event bindingをPostgreSQLで管理できる。media metadata抽出とderived AssetのprovenanceはG4へ延期し、先に既存知識の整合性を修復する。
 
 StructureとDeltaの将来スキーマは`structure-delta-transformation-memory.md`、共有Unitの実験設計は`self-organizing-shared-representations.md`、動的検証は`dynamical-structural-validation.md`を参照する。UnitとStability関連スキーマはtoy experimentで有効性を確認してから確定する。

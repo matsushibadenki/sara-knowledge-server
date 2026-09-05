@@ -1,3 +1,10 @@
+【2026-09-05 方針改訂】
+本書は従来の全体設計・長期構想を保持する資料です。現在の実装順序は docs/roadmap.md、現行設計判断は docs/database-direction-review-2026-09-05.md、合否判定は docs/success-criteria.md を優先します。
+次工程は参照・権限・版と承認の整合性、Worker再実行、Asset確定と復元です。研究機能は独立trackとし、初期DBリリース条件にしません。本書の全項目をそのまま順次実装する指示とは扱わないでください。特に「SKIP LOCKEDだけで重複実行を防げる」「Redis障害でも常にDB pollingできる」は現実装の保証ではなく、修復対象です。
+
+English: Historical design. Follow the current roadmap and September 5 review; research is separate from database release gates.
+简体中文：本文件保留历史设计。当前实施顺序以路线图和9月5日评估为准，研究不作为数据库发布条件。
+
 以下を、そのままCodexへ渡せる実装仕様書としてまとめます。既存の`AI-data-manager`を廃棄せず、WordPressを管理クライアントとして残しながら、PostgreSQLを正本とする構成です。
 
 # SARA Knowledge Server

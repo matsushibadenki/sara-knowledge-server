@@ -18,7 +18,15 @@
 - 外部サービスやリポジトリを参照した場合は、参照先と確認日を記録する
 - 実装とドキュメントに差異がある場合は、未反映であることを明記する
 
+## 現行方針と履歴
+
+実装順序は `roadmap.md`、2026-09-05以降の設計判断は `database-direction-review-2026-09-05.md`、合否判定は `success-criteria.md` を参照する。旧設計書・研究資料と衝突する優先順位はこの3文書を優先する。APIの現状は実装と個別仕様を確認し、未実装の新契約と区別する。日付付きprogress文書は当時の検証記録であり、現在の稼働保証ではない。
+
 ## 現在の主要ドキュメント
+
+- `database-direction-review-2026-09-05.md`: 新しい知識DBとしての成立条件、実装上の不足、revision／訂正／配置／移行方針
+- `success-criteria.md`: 製品gate、三言語比較、正しさ・性能・運用の未測定目標
+- `roadmap-archive-2026-09-05.md`: 改訂前の計画と研究項目の履歴（実装順序ではない）
 
 - `assets.md`: Binary Asset lifecycle、presigned URL、hash検証、provenance binding
 - `data-refinery-and-information-gain.md`: Data Refinery、知識空間Coverage、情報利得、矛盾管理、変換系譜DAG

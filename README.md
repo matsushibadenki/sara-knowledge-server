@@ -6,7 +6,13 @@ AIの知識・経験・学習データをモデルの重みから切り離し、
 >
 > **简体中文：** 一个以 PostgreSQL 为权威数据源的 AI 知识与记忆服务器，用于保存可验证的数据、来源、版本历史和可复用结构，并独立于任何单一模型。
 
-現在はPhase 1の基盤実装中です。認証、Record、Source、監査、品質レビュー、Import／Export、Dataset Snapshot、Training Run、Memory Core、Evidence・Alias・Verificationは動作しますが、graph traversal、RISAの自己組織化、WordPress同期、完全な管理画面はまだ実装されていません。
+現在は知識DBの基盤プロトタイプです。認証、Record／Source、監査、品質レビュー、Import／Export、Dataset Snapshot、Training Run、Memory Core、Evidence・Alias・Verification、bounded graph traversal、非同期Event取り込み、Asset APIが実装されています。承認と内容版の整合性、訂正の依存先への反映、検索、障害復旧、本格的な管理画面は未完成です。
+
+2026-09-05の全体評価で、開発方針を**根拠・版・訂正を一貫して扱うAI向け知識DB**の実証へ絞りました。次は参照・権限・承認の整合性とWorker／Assetの復旧保証を修復し、その後に検索と訂正効果を比較します。研究機能は独立trackです。[評価と設計方針](docs/database-direction-review-2026-09-05.md)、[現行Roadmap](docs/roadmap.md)、[測定可能な成功基準](docs/success-criteria.md)を参照してください。
+
+> **English:** A knowledge database prototype. Next: revision and approval integrity, consistent access, reliable jobs and assets; then correction-aware retrieval benchmarks. Research is a separate track.
+>
+> **简体中文：** 目前是知识数据库原型。下一步先完善版本与审核一致性、权限及任务和资源的可靠性，再验证支持更正的检索效果。研究功能采用独立路线。
 
 ## 成功の定義
 
@@ -137,7 +143,7 @@ AI-data-manager / Next.js / SARA / 外部サービス
 
 - `apps/api`: Bun + HonoによるREST API
 - `apps/admin`: Next.jsによる管理画面。現在は多言語skeleton
-- `apps/worker`: 非同期処理のskeleton
+- `apps/worker`: Import／Export／Event取り込みを処理する内部DB Worker
 - PostgreSQL 16 + pgvector: 構造化データの正本
 - Redis 7: ジョブ、キャッシュ、ログイン試行制限
 - MinIO: 画像・音声・動画などのバイナリアセット
@@ -179,12 +185,17 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
 - [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
 - [Done] Asset API・upload authorization・provenance binding
-- [Next] Asset processing jobs・media metadata extraction・derived-Asset provenance
+- [Next] Record参照・workspace権限・承認とrevisionの整合性修復
+- [Next] 共有domain service・CI統合試験・Worker lease／再実行・Asset確定／復元保証
 
 ### 将来設計
 
+以下は長期候補です。独自の学習・自己組織化・構造推論が成功することを、初期DB製品の成立条件にはしません。
+
 - [Later] WordPress signed sync adapter、差分同期、障害再送
-- [Later] Event、Experience、Concept、Entity、Relation
+- [Later] Source／Memory revision、Evidenceの版固定、訂正の依存先追跡
+- [Later] 根拠と時点を返す三言語検索・比較評価
+- [Later] Asset processing・media metadata・derived-Asset provenance
 - [Later] Structure、Delta、TransformationのMemory Schema
 - [Later] 自己組織化Unit、residual、Assemblyの研究プロトタイプ
 - [Later] Fractal Canopy routing、動的深度、branch growth／inactive pruningのcompute-matched実験
@@ -194,7 +205,7 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Later] 予測誤差・競合・恒常性・Replayによる構造検証
 - [Later] 構造共有からの未知relation候補生成とheld-out評価
 - [Later] 価値駆動学習、Research Queue、夜間バッチ
-- [Later] バックアップ、復元、監査、負荷試験、本番化
+- [Later] 初期復元保証を拡張した運用監査・負荷試験・限定本番pilot
 
 詳細な進捗は[`docs/roadmap.md`](docs/roadmap.md)を参照してください。
 
@@ -459,7 +470,8 @@ packages/      将来の共有パッケージ
 
 ## 主要ドキュメント
 
-- [全体設計書](docs/sara-knowledge-server設計書.txt)
+- [2026-09-05 設計評価と現行方針](docs/database-direction-review-2026-09-05.md)
+- [従来の全体設計書](docs/sara-knowledge-server設計書.txt)
 - [ドキュメント索引](docs/README.md)
 - [ロードマップ](docs/roadmap.md)
 - [成功基準](docs/success-criteria.md)
