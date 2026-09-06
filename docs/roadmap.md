@@ -1,12 +1,12 @@
 # Roadmap
 
-更新: 2026-09-05。[設計評価と方針](database-direction-review-2026-09-05.md)に基づく。進捗と実装順序の正本は本書。過去のprogress文書と[改訂前の全項目](roadmap-archive-2026-09-05.md)は履歴であり、そこにあるNextは現在の着手指示ではない。
+更新: 2026-09-06。[設計評価と方針](database-direction-review-2026-09-05.md)に基づく。進捗と実装順序の正本は本書。過去のprogress文書と[改訂前の全項目](roadmap-archive-2026-09-05.md)は履歴であり、そこにあるNextは現在の着手指示ではない。
 
 - `[Done]` implemented in the current codebase
 - `[Next]` high-priority unfinished work
 - `[Later]` planned, but not the closest next step
 
-Doneは機能の存在を示し、本番品質・全経路の正しさを保証しない。今回の確認は基本テスト9 pass、統合テスト1 skip。各gateは以下の受け入れ試験を実行し、結果を保存するまで未完了とする。
+Doneは機能の存在を示し、本番品質・全経路の正しさを保証しない。2026-09-05の確認は基本テスト9 pass、統合テスト1 skip。各gateは以下の受け入れ試験を実行し、結果を保存するまで未完了とする。
 
 ## 製品目標
 
@@ -84,6 +84,8 @@ English: Prove a revision-aware knowledge database with traceable evidence and c
 - [Later] 複数組織SaaS、RLS等の防御追加、partition／分散化は測定された必要性に基づく
 
 ## 研究track — DBのリリースから独立
+
+- [Later] [意味凝縮 SC-0〜SC-2](semantic-condensation-and-concept-discovery.md)：文章量と文脈多様性の比較、条件付き概念抽出、既存概念との照合、上限付き再探索。生成例を独立証拠に数えず、未知事例で有用性を測る。
 
 - [Later] Structure／Delta／Transformation、構造共有・未知関係生成、factorization／composition
 - [Later] cross-modal Factor、自己組織化Unit／Assembly、Stability／Replay、Spectral scorer

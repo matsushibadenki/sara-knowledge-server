@@ -24,6 +24,8 @@
 
 ## 現在の主要ドキュメント
 
+- `semantic-condensation-and-concept-discovery.md`: 多様な表現からの概念抽出、由来別の証拠管理、条件・反例・再探索のSC-0〜SC-2実験
+
 - `database-direction-review-2026-09-05.md`: 新しい知識DBとしての成立条件、実装上の不足、revision／訂正／配置／移行方針
 - `success-criteria.md`: 製品gate、三言語比較、正しさ・性能・運用の未測定目標
 - `roadmap-archive-2026-09-05.md`: 改訂前の計画と研究項目の履歴（実装順序ではない）
