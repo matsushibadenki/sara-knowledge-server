@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -33,6 +33,9 @@ jobs:
 
       - name: Apply all migrations to an empty database
         run: docker compose run --rm api bun run db:migrate
+
+      - name: Seed the integration administrator
+        run: docker compose run --rm api bun run db:seed
 
       - name: Start API and real Worker
         run: docker compose up -d --wait api worker
