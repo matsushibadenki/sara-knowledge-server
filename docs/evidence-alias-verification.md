@@ -20,9 +20,9 @@ candidate ── reviewer decision ──→ verified / rejected
                   └── immutable decision history
 ```
 
-English: Relation Evidence is append-only and updates support or counterexample counts atomically. Entity aliases are normalized for deduplication. Verification state changes require guarded reviewer decisions and retain immutable history.
+English: Relation Evidence is append-only and updates support or counterexample counts atomically. Entity aliases are normalized for deduplication. Verification decisions are bound to an immutable target revision and content snapshot.
 
-简体中文：关系证据仅追加，并以事务方式更新支持或反例计数。实体别名经过标准化去重。验证状态只能通过带预期状态的审核决定修改，并保留不可变历史。
+简体中文：关系证据仅追加，并以事务方式更新支持或反例计数。实体别名经过标准化去重。验证决定绑定到不可变的目标修订号和内容快照。
 
 ## Relation Evidence
 
@@ -38,7 +38,7 @@ English: Relation Evidence is append-only and updates support or counterexample 
 
 内部参照はSource、Record、Event、Experience、Entity、Concept、Dataset Snapshot、Modelを検証する。`external`はUUIDを持たず、URLや資料情報を`details`へ保存する。
 
-Evidence追加とRelationの`evidence_count`または`counterexample_count`更新は、短い同一DBトランザクションで行う。Evidenceの更新・削除APIは提供しない。重複UIDではトランザクション全体がrollbackされ、countだけ増えることはない。
+Evidence追加は`expected_revision`を必須とする。Evidence追加とRelationのcount／revision更新は、短い同一DBトランザクションで行う。verified／rejectedのRelationへ証拠を追加した場合はcandidateへ戻す。Evidenceの更新・削除APIは提供しない。重複UIDやrevision競合ではトランザクション全体がrollbackされ、countだけ増えることはない。
 
 現段階ではEvidence追加時にconfidenceを自動計算しない。weight、独立Source数、反例、文脈多様性を含むcalibration方式を評価してから導入する。
 
@@ -79,7 +79,9 @@ verified   → candidate
 rejected   → candidate
 ```
 
-検証APIは`memory:verify` scopeとadmin／reviewer roleを要求する。リクエストに`expected_state`を含め、対象更新と`memory.verification_decisions`への履歴追加を同一トランザクションで行う。
+検証APIは`memory:verify` scopeとadmin／reviewer roleを要求する。リクエストに`expected_state`と`expected_revision`を含め、対象更新と`memory.verification_decisions`への履歴追加を同一トランザクションで行う。Decisionは判断後の`target_revision`と`target_snapshot`を保存する。対象を後から編集しても当時の判断対象は変わらない。
+
+移行前から存在するDecisionは`target_revision = 1`、`target_snapshot = {}`として保持する。当時の内容を推測で補完できないため、この空snapshotはlegacy履歴であることを示し、新規Decisionだけが完全な内容snapshotを保証する。
 
 ## API
 
@@ -102,9 +104,12 @@ POST /api/v1/memory/verification/:type/:id
 - [Done] Entity Alias正規化・重複防止
 - [Done] guarded verification transitionとDecision履歴
 - [Done] verification stateの直接PATCH禁止
+- [Done] Memory revision・`expected_revision`競合制御
+- [Done] Verification Decisionの対象revision・内容snapshot固定
+- [Done] verified／rejected内容の変更時candidate化
 - [Done] Bulk Event ingestion・bounded graph traversal
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
 - [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
 - [Done] Asset API・upload authorization・provenance binding
-- [Next] Asset processing jobs・derived-Asset provenance
+- [Next] API／Workerのdomain service・入力schema共有と試験分割
 - [Later] confidence calibration、独立Source集計、合議レビュー

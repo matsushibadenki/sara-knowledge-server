@@ -69,6 +69,8 @@ drizzle.__drizzle_migrations
 - `memory.relation_evidence`
 - `memory.verification_decisions`
 
+Experience、Event、Entity、Entity Alias、Concept、Relationは楽観的競合制御用の`revision`を持つ。Verification Decisionは判断対象を後から復元できるように`target_revision`と`target_snapshot`を保持する。Migration前のlegacy Decisionでは内容を推測せず、snapshotを空objectとして移行する。
+
 ### 拡張
 
 PostgreSQLの初期化時と冪等migrationで以下を有効化する。既存volumeにもmigrationで不足分を追加する。

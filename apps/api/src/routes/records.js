@@ -19,6 +19,7 @@ const recordTypes = [
 ];
 
 const recordStatuses = ['draft', 'pending_review', 'approved', 'rejected', 'archived'];
+const directWriteStatus = 'draft';
 
 const recordInputSchema = z.object({
   record_type: z.enum(recordTypes),
@@ -53,6 +54,10 @@ const uuidSchema = z.string().uuid();
 
 function errorResponse(c, status, code, message, details = []) {
   return c.json({ data: null, meta: {}, error: { code, message, details } }, status);
+}
+
+function requiresReviewWorkflow(status) {
+  return status !== undefined && status !== directWriteStatus;
 }
 
 function serializeRecord(record, version = null, source = undefined) {
@@ -179,6 +184,9 @@ recordsRoutes.post('/', requireScopes('records:write'), requireRoles('admin', 'e
   if (!result.success) {
     return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record input is invalid.', result.error.issues);
   }
+  if (requiresReviewWorkflow(result.data.status)) {
+    return errorResponse(c, 422, 'REVIEW_STATUS_REQUIRED', 'New records must start as draft. Submit the current version for review to change its status.');
+  }
 
   const auth = c.get('auth');
   const recordId = crypto.randomUUID();
@@ -194,7 +202,7 @@ recordsRoutes.post('/', requireScopes('records:write'), requireRoles('admin', 'e
       id: recordId,
       recordType: input.record_type,
       title: input.title ?? null,
-      status: input.status || 'draft',
+      status: directWriteStatus,
       currentVersionId: null,
       languageCode: input.language_code ?? null,
       qualityScore: input.quality_score ?? null,
@@ -288,6 +296,9 @@ recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin'
   if (!result.success) {
     return errorResponse(c, 400, 'VALIDATION_ERROR', 'Record update is invalid.', result.error.issues);
   }
+  if (requiresReviewWorkflow(result.data.status)) {
+    return errorResponse(c, 422, 'REVIEW_STATUS_REQUIRED', 'Direct updates can only produce a draft. Use the review workflow for approval decisions.');
+  }
 
   const auth = c.get('auth');
   const input = result.data;
@@ -337,7 +348,7 @@ recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin'
       .set({
         ...(input.record_type === undefined ? {} : { recordType: input.record_type }),
         ...(input.title === undefined ? {} : { title: input.title }),
-        ...(input.status === undefined ? {} : { status: input.status }),
+        status: directWriteStatus,
         ...(input.language_code === undefined ? {} : { languageCode: input.language_code }),
         ...(input.quality_score === undefined ? {} : { qualityScore: input.quality_score }),
         ...(input.confidence === undefined ? {} : { confidence: input.confidence }),

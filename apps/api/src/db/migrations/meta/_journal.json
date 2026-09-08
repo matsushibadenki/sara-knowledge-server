@@ -162,6 +162,20 @@
       "when": 1788296397043,
       "tag": "0022_flashy_daredevil",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788826786839,
+      "tag": "0023_plain_hannibal_king",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788829388708,
+      "tag": "0024_aspiring_skreet",
+      "breakpoints": true
     }
   ]
 }

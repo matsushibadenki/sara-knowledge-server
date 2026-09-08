@@ -59,9 +59,9 @@ function serializeSnapshot(item) {
   };
 }
 
-async function ownedDefinition(id, ownerId) {
+async function activeDefinition(id) {
   const [item] = await db.select().from(datasetDefinitions)
-    .where(and(eq(datasetDefinitions.id, id), eq(datasetDefinitions.createdBy, ownerId), isNull(datasetDefinitions.deletedAt))).limit(1);
+    .where(and(eq(datasetDefinitions.id, id), isNull(datasetDefinitions.deletedAt))).limit(1);
   return item;
 }
 
@@ -90,7 +90,7 @@ datasetRoutes.get('/', requireScopes('datasets:read'), requireRoles('admin', 'ed
   const query = listSchema.safeParse({ limit: c.req.query('limit') });
   if (!query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Dataset query is invalid.', query.error.issues);
   const items = await db.select().from(datasetDefinitions)
-    .where(and(eq(datasetDefinitions.createdBy, c.get('auth').sub), isNull(datasetDefinitions.deletedAt)))
+    .where(isNull(datasetDefinitions.deletedAt))
     .orderBy(desc(datasetDefinitions.updatedAt)).limit(query.data.limit);
   return c.json({ data: items.map(serializeDefinition), meta: { limit: query.data.limit }, error: null });
 });
@@ -114,7 +114,7 @@ datasetRoutes.post('/', requireScopes('datasets:write'), requireRoles('admin', '
 datasetRoutes.get('/:id', requireScopes('datasets:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Dataset ID must be a UUID.');
-  const item = await ownedDefinition(id.data, c.get('auth').sub);
+  const item = await activeDefinition(id.data);
   if (!item) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Dataset definition was not found.');
   return c.json({ data: serializeDefinition(item), meta: {}, error: null });
 });
@@ -130,7 +130,7 @@ datasetRoutes.patch('/:id', requireScopes('datasets:write'), requireRoles('admin
       ...(input.data.filters === undefined ? {} : { filters: input.data.filters }),
       ...(input.data.manifest_format === undefined ? {} : { manifestFormat: input.data.manifest_format }),
       updatedAt: new Date(),
-    }).where(and(eq(datasetDefinitions.id, id.data), eq(datasetDefinitions.createdBy, c.get('auth').sub), isNull(datasetDefinitions.deletedAt))).returning();
+    }).where(and(eq(datasetDefinitions.id, id.data), isNull(datasetDefinitions.deletedAt))).returning();
     if (!updated) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Dataset definition was not found.');
     return c.json({ data: serializeDefinition(updated), meta: {}, error: null });
   } catch (error) {
@@ -142,7 +142,7 @@ datasetRoutes.patch('/:id', requireScopes('datasets:write'), requireRoles('admin
 datasetRoutes.get('/:id/snapshots', requireScopes('datasets:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Dataset ID must be a UUID.');
-  const definition = await ownedDefinition(id.data, c.get('auth').sub);
+  const definition = await activeDefinition(id.data);
   if (!definition) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Dataset definition was not found.');
   const items = await db.select().from(datasetSnapshots).where(eq(datasetSnapshots.definitionId, definition.id)).orderBy(desc(datasetSnapshots.createdAt));
   return c.json({ data: items.map(serializeSnapshot), meta: {}, error: null });
@@ -151,7 +151,7 @@ datasetRoutes.get('/:id/snapshots', requireScopes('datasets:read'), requireRoles
 datasetRoutes.post('/:id/snapshots', requireScopes('datasets:write'), requireRoles('admin', 'editor'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Dataset ID must be a UUID.');
-  const definition = await ownedDefinition(id.data, c.get('auth').sub);
+  const definition = await activeDefinition(id.data);
   if (!definition) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Dataset definition was not found.');
   const filters = definition.filters || {};
   const conditions = [isNull(records.deletedAt)];
@@ -205,7 +205,7 @@ datasetRoutes.post('/:id/snapshots', requireScopes('datasets:write'), requireRol
 datasetRoutes.get('/:id/snapshots/:snapshotId', requireScopes('datasets:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id')); const snapshotId = uuidSchema.safeParse(c.req.param('snapshotId'));
   if (!id.success || !snapshotId.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Dataset and snapshot IDs must be UUIDs.');
-  const definition = await ownedDefinition(id.data, c.get('auth').sub);
+  const definition = await activeDefinition(id.data);
   if (!definition) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Dataset definition was not found.');
   const [snapshot] = await db.select().from(datasetSnapshots)
     .where(and(eq(datasetSnapshots.id, snapshotId.data), eq(datasetSnapshots.definitionId, definition.id))).limit(1);
@@ -217,7 +217,7 @@ datasetRoutes.get('/:id/snapshots/:snapshotId', requireScopes('datasets:read'), 
 datasetRoutes.get('/:id/snapshots/:snapshotId/manifest', requireScopes('datasets:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id')); const snapshotId = uuidSchema.safeParse(c.req.param('snapshotId'));
   if (!id.success || !snapshotId.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Dataset and snapshot IDs must be UUIDs.');
-  const definition = await ownedDefinition(id.data, c.get('auth').sub);
+  const definition = await activeDefinition(id.data);
   if (!definition) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Dataset definition was not found.');
   const [snapshot] = await db.select().from(datasetSnapshots).where(and(eq(datasetSnapshots.id, snapshotId.data), eq(datasetSnapshots.definitionId, definition.id))).limit(1);
   if (!snapshot || snapshot.status !== 'completed' || !snapshot.manifestObjectKey) return errorResponse(c, 409, 'MANIFEST_NOT_READY', 'Dataset manifest is not ready.');

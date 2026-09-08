@@ -16,9 +16,9 @@ Experience ── contains ── Event
              typed Relation
 ```
 
-English: Memory Core stores Events, Experiences, Entities, Concepts, and typed Relations while preserving provenance, time, confidence, proposal source, and verification state.
+English: Memory Core stores Events, Experiences, Entities, Concepts, and typed Relations while preserving provenance, time, confidence, proposal source, verification state, and an optimistic concurrency revision.
 
-简体中文：Memory Core 保存事件、经验、实体、概念和类型化关系，同时保留来源、时间、置信度、候选生成来源及验证状态。
+简体中文：Memory Core 保存事件、经验、实体、概念和类型化关系，同时保留来源、时间、置信度、候选生成来源、验证状态和用于并发控制的修订号。
 
 ## 実装テーブル
 
@@ -67,16 +67,18 @@ LLM、rule、RISAなどが生成した内容は原則として`unverified`また
 
 ## 整合性
 
-- 全Memory行を作成者境界内で扱う。
-- UIDは作成者内で一意にする。
-- Source参照は論理削除されていない所有Sourceだけを許可する。
-- EventのExperience参照は有効な所有Experienceだけを許可する。
+- 全Memory行は現在のsingleton workspaceで共有し、`created_by`は作者情報として扱う。
+- UIDは作者ごとに一意にする。これは名前衝突の規則であり、アクセス境界ではない。
+- Source参照は論理削除されていない共有Sourceだけを許可する。
+- EventのExperience参照は有効なworkspace共有Experienceだけを許可する。
 - Relationの両端はサービス層でnode type、存在、所有者、論理削除状態を検証する。
 - Dataset Snapshot nodeは`completed`のみRelationへ利用できる。
 - 削除は論理削除とし、通常の取得・一覧・neighbor検索から除外する。
 - 有効RelationまたはEventから参照されているMemory nodeの削除は拒否し、dangling edgeを防ぐ。
 - probability、count、duration、delay、validity rangeはAPIとDB CHECKの両方で検証する。
 - Relationのsource／target検索には有効行だけの部分複合索引を使用する。
+- 各Memory objectは1から始まる`revision`を持つ。PATCHは`expected_revision`を必須とし、一致した1件だけを更新してrevisionを増分する。
+- verified／rejectedの内容をPATCHした場合はcandidateへ戻し、再検証を要求する。
 
 多型RelationはPostgreSQLの通常FKだけでは参照先を完全保証できない。現段階ではサービス層検証を必須とし、将来の運用データを見て型別edge tableへの分割を再評価する。
 
@@ -96,6 +98,15 @@ GET /api/v1/memory/nodes/:type/:id/neighbors
 
 読み取りは`memory:read`、変更は`memory:write` scopeを要求する。
 
+PATCH例:
+
+```json
+{
+  "expected_revision": 3,
+  "description": "Corrected description"
+}
+```
+
 ## 次の実装
 
 - [Done] Event・Experience・Entity・Concept・Relationの最小Schema
@@ -107,5 +118,6 @@ GET /api/v1/memory/nodes/:type/:id/neighbors
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
 - [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
 - [Done] Asset API・upload authorization・provenance binding
-- [Next] Asset processing jobs・derived-Asset provenance
-- [Later] bulk Event、traverse、embedding、activation、Replay
+- [Done] revision競合制御・承認後編集のcandidate化
+- [Next] API／Workerのdomain service・入力schema共有と試験分割
+- [Later] embedding、activation、Replay

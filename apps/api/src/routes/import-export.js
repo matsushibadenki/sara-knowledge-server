@@ -168,10 +168,10 @@ importRoutes.post('/:id/cancel', async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Import ID must be a UUID.');
   const [job] = await db.update(importJobs).set({ cancelRequested: true })
-    .where(and(eq(importJobs.id, id.data), eq(importJobs.createdBy, c.get('auth').sub), inArray(importJobs.status, ['queued', 'processing']))).returning();
+    .where(and(eq(importJobs.id, id.data), inArray(importJobs.status, ['queued', 'processing']))).returning();
   if (!job) {
     const [existing] = await db.select({ id: importJobs.id }).from(importJobs)
-      .where(and(eq(importJobs.id, id.data), eq(importJobs.createdBy, c.get('auth').sub))).limit(1);
+      .where(eq(importJobs.id, id.data)).limit(1);
     return existing
       ? errorResponse(c, 409, 'JOB_NOT_CANCELLABLE', 'Only queued or processing imports can be cancelled.')
       : errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Import was not found.');
@@ -183,7 +183,6 @@ importRoutes.get('/', async (c) => {
   const query = listSchema.safeParse({ limit: c.req.query('limit') });
   if (!query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Import query is invalid.', query.error.issues);
   const jobs = await db.select().from(importJobs)
-    .where(eq(importJobs.createdBy, c.get('auth').sub))
     .orderBy(desc(importJobs.createdAt)).limit(query.data.limit);
   return c.json({ data: jobs.map(serializeImport), meta: { limit: query.data.limit }, error: null });
 });
@@ -192,7 +191,7 @@ importRoutes.get('/:id', async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Import ID must be a UUID.');
   const [job] = await db.select().from(importJobs)
-    .where(and(eq(importJobs.id, id.data), eq(importJobs.createdBy, c.get('auth').sub))).limit(1);
+    .where(eq(importJobs.id, id.data)).limit(1);
   if (!job) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Import was not found.');
   const items = await db.select().from(importItems)
     .where(eq(importItems.importJobId, job.id)).orderBy(importItems.rowNumber);
@@ -263,10 +262,10 @@ exportRoutes.post('/:id/cancel', async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Export ID must be a UUID.');
   const [job] = await db.update(exportJobs).set({ cancelRequested: true })
-    .where(and(eq(exportJobs.id, id.data), eq(exportJobs.createdBy, c.get('auth').sub), inArray(exportJobs.status, ['queued', 'processing']))).returning();
+    .where(and(eq(exportJobs.id, id.data), inArray(exportJobs.status, ['queued', 'processing']))).returning();
   if (!job) {
     const [existing] = await db.select({ id: exportJobs.id }).from(exportJobs)
-      .where(and(eq(exportJobs.id, id.data), eq(exportJobs.createdBy, c.get('auth').sub))).limit(1);
+      .where(eq(exportJobs.id, id.data)).limit(1);
     return existing
       ? errorResponse(c, 409, 'JOB_NOT_CANCELLABLE', 'Only queued or processing exports can be cancelled.')
       : errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Export was not found.');
@@ -278,7 +277,7 @@ exportRoutes.get('/:id/download', async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Export ID must be a UUID.');
   const [job] = await db.select().from(exportJobs)
-    .where(and(eq(exportJobs.id, id.data), eq(exportJobs.createdBy, c.get('auth').sub))).limit(1);
+    .where(eq(exportJobs.id, id.data)).limit(1);
   if (!job) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Export was not found.');
   if (job.status !== 'completed' || !job.objectKey) return errorResponse(c, 409, 'EXPORT_NOT_READY', 'Export is not ready for download.');
   const content = await readObject(job.objectKey);
@@ -293,7 +292,7 @@ exportRoutes.get('/:id', async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Export ID must be a UUID.');
   const [job] = await db.select().from(exportJobs)
-    .where(and(eq(exportJobs.id, id.data), eq(exportJobs.createdBy, c.get('auth').sub))).limit(1);
+    .where(eq(exportJobs.id, id.data)).limit(1);
   if (!job) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Export was not found.');
   return c.json({ data: serializeExport(job), meta: {}, error: null });
 });

@@ -32,6 +32,8 @@ pending_review
 
 pending中はRecord更新と論理削除を409で拒否する。Review判定時にもRecordとReviewを行ロックし、申請Versionと現在Versionが異なる場合は判定しない。pending ReviewはRecordごとに1件だけで、DB部分一意索引でも保証する。
 
+一般POST、PATCH、同期Import、非同期Workerは`approved`や`pending_review`を作成できない。承認後に内容や属性を更新すると新しいVersionが作られ、Recordは`draft`へ戻る。承認済みReviewは承認対象だった旧Versionに固定して残る。
+
 ## 権限
 
 - 閲覧: `records:read`、admin／editor／reviewer／viewer

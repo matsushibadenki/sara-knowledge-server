@@ -85,15 +85,15 @@ function serializeMetric(item) {
   };
 }
 
-async function ownedModel(id, ownerId) {
+async function activeModel(id) {
   const [item] = await db.select().from(trainingModels)
-    .where(and(eq(trainingModels.id, id), eq(trainingModels.createdBy, ownerId), isNull(trainingModels.deletedAt))).limit(1);
+    .where(and(eq(trainingModels.id, id), isNull(trainingModels.deletedAt))).limit(1);
   return item;
 }
 
-async function ownedRun(id, ownerId) {
+async function activeRun(id) {
   const [item] = await db.select().from(trainingRuns)
-    .where(and(eq(trainingRuns.id, id), eq(trainingRuns.createdBy, ownerId))).limit(1);
+    .where(eq(trainingRuns.id, id)).limit(1);
   return item;
 }
 
@@ -104,7 +104,7 @@ trainingRoutes.get('/models', requireScopes('training:read'), requireRoles('admi
   const query = listSchema.safeParse({ limit: c.req.query('limit') });
   if (!query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Model query is invalid.', query.error.issues);
   const items = await db.select().from(trainingModels)
-    .where(and(eq(trainingModels.createdBy, c.get('auth').sub), isNull(trainingModels.deletedAt)))
+    .where(isNull(trainingModels.deletedAt))
     .orderBy(desc(trainingModels.updatedAt), desc(trainingModels.id)).limit(query.data.limit);
   return c.json({ data: items.map(serializeModel), meta: { limit: query.data.limit }, error: null });
 });
@@ -129,7 +129,7 @@ trainingRoutes.post('/models', requireScopes('training:write'), requireRoles('ad
 trainingRoutes.get('/models/:id', requireScopes('training:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Model ID must be a UUID.');
-  const item = await ownedModel(id.data, c.get('auth').sub);
+  const item = await activeModel(id.data);
   if (!item) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Model was not found.');
   return c.json({ data: serializeModel(item), meta: {}, error: null });
 });
@@ -147,7 +147,7 @@ trainingRoutes.patch('/models/:id', requireScopes('training:write'), requireRole
       ...(input.data.base_model === undefined ? {} : { baseModel: input.data.base_model }),
       ...(input.data.configuration === undefined ? {} : { configuration: input.data.configuration }),
       updatedAt: new Date(),
-    }).where(and(eq(trainingModels.id, id.data), eq(trainingModels.createdBy, c.get('auth').sub), isNull(trainingModels.deletedAt))).returning();
+    }).where(and(eq(trainingModels.id, id.data), isNull(trainingModels.deletedAt))).returning();
     if (!updated) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Model was not found.');
     return c.json({ data: serializeModel(updated), meta: {}, error: null });
   } catch (error) {
@@ -159,7 +159,7 @@ trainingRoutes.patch('/models/:id', requireScopes('training:write'), requireRole
 trainingRoutes.get('/runs', requireScopes('training:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const query = listSchema.safeParse({ limit: c.req.query('limit') });
   if (!query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Run query is invalid.', query.error.issues);
-  const items = await db.select().from(trainingRuns).where(eq(trainingRuns.createdBy, c.get('auth').sub))
+  const items = await db.select().from(trainingRuns)
     .orderBy(desc(trainingRuns.createdAt), desc(trainingRuns.id)).limit(query.data.limit);
   return c.json({ data: items.map(serializeRun), meta: { limit: query.data.limit }, error: null });
 });
@@ -169,10 +169,9 @@ trainingRoutes.post('/runs', requireScopes('training:write'), requireRoles('admi
   if (!input.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Training run is invalid.', input.error.issues);
   const ownerId = c.get('auth').sub;
   const [model, snapshot] = await Promise.all([
-    ownedModel(input.data.model_id, ownerId),
+    activeModel(input.data.model_id),
     db.select().from(datasetSnapshots).where(and(
       eq(datasetSnapshots.id, input.data.dataset_snapshot_id),
-      eq(datasetSnapshots.createdBy, ownerId),
       eq(datasetSnapshots.status, 'completed'),
     )).limit(1).then(([item]) => item),
   ]);
@@ -202,7 +201,7 @@ trainingRoutes.post('/runs', requireScopes('training:write'), requireRoles('admi
 trainingRoutes.get('/runs/:id', requireScopes('training:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Run ID must be a UUID.');
-  const run = await ownedRun(id.data, c.get('auth').sub);
+  const run = await activeRun(id.data);
   if (!run) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Training run was not found.');
   const metrics = await db.select().from(trainingMetrics).where(eq(trainingMetrics.runId, run.id))
     .orderBy(asc(trainingMetrics.recordedAt), asc(trainingMetrics.id)).limit(1000);
@@ -213,7 +212,7 @@ trainingRoutes.post('/runs/:id/status', requireScopes('training:write'), require
   const id = uuidSchema.safeParse(c.req.param('id'));
   const input = transitionSchema.safeParse(await c.req.json().catch(() => null));
   if (!id.success || !input.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Run transition is invalid.', input.error?.issues || []);
-  const run = await ownedRun(id.data, c.get('auth').sub);
+  const run = await activeRun(id.data);
   if (!run) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Training run was not found.');
   const allowed = { queued: ['running', 'cancelled'], running: ['completed', 'failed', 'cancelled'] };
   if (!allowed[run.status]?.includes(input.data.status)) {
@@ -234,7 +233,7 @@ trainingRoutes.post('/runs/:id/status', requireScopes('training:write'), require
 trainingRoutes.get('/runs/:id/metrics', requireScopes('training:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Run ID must be a UUID.');
-  const run = await ownedRun(id.data, c.get('auth').sub);
+  const run = await activeRun(id.data);
   if (!run) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Training run was not found.');
   const items = await db.select().from(trainingMetrics).where(eq(trainingMetrics.runId, run.id))
     .orderBy(asc(trainingMetrics.recordedAt), asc(trainingMetrics.id)).limit(1000);
@@ -245,7 +244,7 @@ trainingRoutes.post('/runs/:id/metrics', requireScopes('training:write'), requir
   const id = uuidSchema.safeParse(c.req.param('id'));
   const input = metricSchema.safeParse(await c.req.json().catch(() => null));
   if (!id.success || !input.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Metric is invalid.', input.error?.issues || []);
-  const run = await ownedRun(id.data, c.get('auth').sub);
+  const run = await activeRun(id.data);
   if (!run) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Training run was not found.');
   if (!['running', 'completed'].includes(run.status)) return errorResponse(c, 409, 'RUN_NOT_MEASURABLE', 'Metrics require a running or completed run.');
   try {

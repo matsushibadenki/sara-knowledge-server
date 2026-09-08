@@ -213,11 +213,11 @@ app.get('/openapi.json', (c) => c.json({
       post: { summary: 'Append a run metric', security: [{ bearerAuth: [] }], 'x-required-scope': 'training:write' },
     },
     '/memory/experiences': {
-      get: { summary: 'List owned experiences', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      get: { summary: 'List workspace experiences', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
       post: { summary: 'Create a provenance-bound experience', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
     },
     '/memory/events': {
-      get: { summary: 'List owned events', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      get: { summary: 'List workspace events', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
       post: { summary: 'Create a temporal event', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
     },
     '/memory/events/bulk': {
@@ -243,7 +243,7 @@ app.get('/openapi.json', (c) => c.json({
       post: { summary: 'Request cancellation of a queued or processing Event job', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write', 'x-api-key-access': false },
     },
     '/memory/entities': {
-      get: { summary: 'List owned entities', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      get: { summary: 'List workspace entities', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
       post: { summary: 'Create an entity candidate', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
     },
     '/memory/entities/{id}/aliases': {
@@ -251,26 +251,26 @@ app.get('/openapi.json', (c) => c.json({
       post: { summary: 'Create an entity alias candidate', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
     },
     '/memory/concepts': {
-      get: { summary: 'List owned concepts', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      get: { summary: 'List workspace concepts', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
       post: { summary: 'Create a concept candidate', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
     },
     '/memory/relations': {
-      get: { summary: 'List owned typed relations', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      get: { summary: 'List workspace typed relations', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
       post: { summary: 'Create a relation after validating both nodes', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
     },
     '/memory/relations/{id}/evidence': {
       get: { summary: 'List append-only relation evidence', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
-      post: { summary: 'Append evidence and atomically update relation counts', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
+      post: { summary: 'Append evidence using expected_revision and atomically update relation counts', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:write' },
     },
     '/memory/verification/{type}/{id}': {
       get: { summary: 'List verification decision history', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
-      post: { summary: 'Apply a guarded verification transition', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:verify', 'x-allowed-user-roles': ['admin', 'reviewer'] },
+      post: { summary: 'Verify an expected revision and retain its content snapshot', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:verify', 'x-allowed-user-roles': ['admin', 'reviewer'] },
     },
     '/memory/nodes/{type}/{id}/neighbors': {
       get: { summary: 'List incoming and outgoing active relations', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
     },
     '/memory/traverse': {
-      post: { summary: 'Traverse an owned memory graph within hard depth and size limits', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
+      post: { summary: 'Traverse the workspace memory graph within hard depth and size limits', security: [{ bearerAuth: [] }], 'x-required-scope': 'memory:read' },
     },
     '/assets/upload-url': {
       post: { summary: 'Reserve Asset metadata and create a five-minute presigned upload URL', security: [{ bearerAuth: [] }], 'x-required-scope': 'assets:write' },

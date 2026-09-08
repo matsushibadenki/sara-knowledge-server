@@ -398,7 +398,7 @@ GET    /audit-logs
 GET    /audit-logs/:id
 ```
 
-JWTアクセストークンまたは`sara_`プレフィックスのAPIキーをBearer Tokenとして送信します。Record更新では競合検出のため`expected_version`が必要です。Recordへ出典を関連付ける場合は、先にSourceを作成して`source_id`を指定します。
+JWTアクセストークンまたは`sara_`プレフィックスのAPIキーをBearer Tokenとして送信します。Record更新では競合検出のため`expected_version`、Memory PATCH／Relation Evidence追加／Verificationでは`expected_revision`が必要です。Recordへ出典を関連付ける場合は、先にSourceを作成して`source_id`を指定します。
 
 ```text
 Authorization: Bearer <JWT or sara_API_KEY>
@@ -430,10 +430,11 @@ docker compose exec api bun test
 PostgreSQL、Redis、migration、管理者seedを利用する統合テスト:
 
 ```bash
-docker compose exec -e RUN_INTEGRATION=1 api bun test
+docker compose exec -e RUN_INTEGRATION=1 -e MINIO_PUBLIC_ENDPOINT=http://minio:9000 api bun test
 ```
 
 統合テストを実行する前に、migrationと管理者seedを完了してください。
+テストはAPIコンテナ内から署名URLへアクセスするため、`MINIO_PUBLIC_ENDPOINT`をCompose内部のMinIOへ一時的に向けます。通常起動中のAPIが返す公開署名URLの設定は変更しません。
 
 ## 運用コマンド
 

@@ -1,5 +1,7 @@
 // /apps/worker/src/index.js
 import postgres from 'postgres';
+import { memoryEventAsyncSchema, memoryEventValues } from '@sara-knowledge/domain-contracts/memory-events';
+import { normalizeImportedRecord, parseImportContent } from '@sara-knowledge/domain-contracts/record-import';
 
 const sql = postgres(process.env.DATABASE_URL || 'postgresql://sara:change_me@localhost:5432/sara_knowledge', { max: 4 });
 const redis = new Bun.RedisClient(process.env.REDIS_URL || 'redis://localhost:6379');
@@ -12,62 +14,6 @@ const s3 = new Bun.S3Client({
   bucket: process.env.MINIO_BUCKET || 'sara-assets',
   region: 'us-east-1',
 });
-
-function parseCsv(content) {
-  const rows = []; let row = []; let field = ''; let quoted = false;
-  for (let i = 0; i < content.length; i += 1) {
-    const ch = content[i];
-    if (quoted) {
-      if (ch === '"' && content[i + 1] === '"') { field += '"'; i += 1; }
-      else if (ch === '"') quoted = false;
-      else field += ch;
-    } else if (ch === '"') quoted = true;
-    else if (ch === ',') { row.push(field); field = ''; }
-    else if (ch === '\n') { row.push(field.replace(/\r$/, '')); rows.push(row); row = []; field = ''; }
-    else field += ch;
-  }
-  if (quoted) throw new Error('CSV contains an unterminated quoted field.');
-  if (field || row.length) { row.push(field.replace(/\r$/, '')); rows.push(row); }
-  const data = rows.filter((values) => values.some(Boolean));
-  if (data.length < 2) return [];
-  const headers = data[0].map((value) => value.trim());
-  return data.slice(1).map((values) => Object.fromEntries(headers.map((header, i) => [header, values[i] ?? ''])));
-}
-
-function parseContent(format, content) {
-  if (format === 'jsonl') return content.split(/\r?\n/).filter((line) => line.trim()).map(JSON.parse);
-  if (format === 'csv') return parseCsv(content);
-  const parsed = JSON.parse(content);
-  return Array.isArray(parsed) ? parsed : Array.isArray(parsed?.records) ? parsed.records : [parsed];
-}
-
-function maybeJson(value) {
-  if (typeof value !== 'string') return value;
-  try { return JSON.parse(value); } catch { return value; }
-}
-
-function normalize(row, defaults = {}) {
-  if (!row || typeof row !== 'object' || Array.isArray(row) || !Object.keys(row).length) throw new Error('Row must be a non-empty object.');
-  const recordType = row.record_type || defaults.record_type || (row.instruction !== undefined ? 'instruction' : 'plain_text');
-  const allowed = ['plain_text', 'instruction', 'qa', 'chat', 'sharegpt', 'chatml', 'dpo', 'rlhf', 'classification', 'image_caption', 'multimodal', 'event_sequence', 'custom'];
-  if (!allowed.includes(recordType)) throw new Error(`Unsupported record_type: ${recordType}`);
-  const status = row.status || defaults.status || 'draft';
-  if (!['draft', 'pending_review', 'approved', 'rejected', 'archived'].includes(status)) throw new Error(`Unsupported status: ${status}`);
-  const qualityScore = row.quality_score === '' || row.quality_score == null ? null : Number(row.quality_score);
-  const confidence = row.confidence === '' || row.confidence == null ? null : Number(row.confidence);
-  if ((qualityScore != null && (!Number.isFinite(qualityScore) || qualityScore < 0 || qualityScore > 1))
-    || (confidence != null && (!Number.isFinite(confidence) || confidence < 0 || confidence > 1))) {
-    throw new Error('quality_score and confidence must be between 0 and 1.');
-  }
-  return {
-    recordType, title: row.title || null, status,
-    languageCode: row.language_code || defaults.language_code || null,
-    qualityScore, confidence,
-    content: row.content === undefined ? row : maybeJson(row.content),
-    plainText: row.plain_text || row.text || null, schemaVersion: row.schema_version || '1.0',
-    metadata: row.metadata && typeof maybeJson(row.metadata) === 'object' ? maybeJson(row.metadata) : {},
-  };
-}
 
 async function claimImport() {
   return sql.begin(async (tx) => {
@@ -106,9 +52,8 @@ async function isCancelled(type, id) {
 async function processImport(job) {
   try {
     const content = await s3.file(job.object_key).text();
-    const rows = parseContent(job.format, content);
     const maxRows = Number(process.env.ASYNC_IMPORT_MAX_ROWS || 100000);
-    if (rows.length > maxRows) throw new Error(`Import exceeds the ${maxRows} row limit.`);
+    const rows = parseImportContent(job.format, content, { maxRows });
     const [resume] = await sql`SELECT COALESCE(max(row_number),0)::int AS processed, count(*) FILTER (WHERE status='succeeded')::int AS succeeded, count(*) FILTER (WHERE status='failed')::int AS failed FROM dataset.import_items WHERE import_job_id=${job.id}`;
     await sql`UPDATE dataset.import_jobs SET total_count=${rows.length}, processed_count=${resume.processed}, succeeded_count=${resume.succeeded}, failed_count=${resume.failed} WHERE id=${job.id}`;
     let succeeded = resume.succeeded; let failed = resume.failed;
@@ -118,7 +63,7 @@ async function processImport(job) {
         return;
       }
       try {
-        const item = normalize(rows[i], job.options || {});
+        const item = normalizeImportedRecord(rows[i], job.options || {});
         await sql.begin(async (tx) => {
           const recordId = crypto.randomUUID(); const versionId = crypto.randomUUID();
           await tx`INSERT INTO dataset.records (id,record_type,title,status,current_version_id,language_code,quality_score,confidence,source_id,owner_id,metadata) VALUES (${recordId},${item.recordType},${item.title},${item.status},NULL,${item.languageCode},${item.qualityScore},${item.confidence},${job.source_id},${job.created_by},${tx.json(item.metadata)})`;
@@ -183,33 +128,40 @@ async function processMemoryEvents(job) {
       await sql`UPDATE memory.event_ingestion_jobs SET status='cancelled', completed_at=now() WHERE id=${job.id}`;
       return;
     }
-    const parsed = JSON.parse(await s3.file(job.object_key).text());
-    const events = parsed?.events;
-    if (!Array.isArray(events) || events.length !== job.event_count || events.length < 501 || events.length > 10000) {
+    const stored = JSON.parse(await s3.file(job.object_key).text());
+    const parsed = memoryEventAsyncSchema.safeParse({
+      batch_uid: stored?.batch_uid ?? job.batch_uid,
+      events: stored?.events,
+    });
+    if (!parsed.success || parsed.data.batch_uid !== job.batch_uid || parsed.data.events.length !== job.event_count) {
       throw new Error('Stored Event batch count is invalid.');
     }
+    const events = parsed.data.events;
     const batchId = crypto.randomUUID();
     const now = new Date();
     await sql.begin(async (tx) => {
       await tx`INSERT INTO memory.event_ingestion_batches (id,batch_uid,content_hash,event_count,created_by,created_at) VALUES (${batchId},${job.batch_uid},${job.content_hash},${events.length},${job.created_by},${now})`;
-      const rows = events.map((event, index) => ({
-        id: crypto.randomUUID(), event_uid: event.event_uid,
-        source_id: event.source_id ?? null, experience_id: event.experience_id ?? null,
-        ingestion_batch_id: batchId, batch_position: index + 1,
-        occurred_at: event.occurred_at ?? null, sequence_time: event.sequence_time ?? null,
-        duration: event.duration ?? null, modality: event.modality, channel: event.channel ?? null,
-        event_type: event.event_type, symbol: event.symbol ?? null,
-        payload: tx.json(event.payload ?? {}), state_before: event.state_before == null ? null : tx.json(event.state_before),
-        state_after: event.state_after == null ? null : tx.json(event.state_after),
-        reward: event.reward ?? 0, prediction_error: event.prediction_error ?? 0,
-        confidence: event.confidence ?? 1, quality_score: event.quality_score ?? 0.5,
-        proposal_source: event.proposal_source, extractor_name: event.extractor_name ?? null,
-        extractor_version: event.extractor_version ?? null,
-        verification_state: event.verification_state ?? 'unverified', source_hash: event.source_hash ?? null,
-        novelty: event.novelty ?? 0, priority_score: event.priority_score ?? 0,
-        metadata: tx.json(event.metadata ?? {}), created_by: job.created_by,
-        created_at: now, updated_at: now, deleted_at: null,
-      }));
+      const rows = events.map((event, index) => {
+        const values = memoryEventValues(event);
+        return {
+          id: crypto.randomUUID(), event_uid: values.eventUid,
+          source_id: values.sourceId, experience_id: values.experienceId,
+          ingestion_batch_id: batchId, batch_position: index + 1,
+          occurred_at: values.occurredAt, sequence_time: values.sequenceTime,
+          duration: values.duration, modality: values.modality, channel: values.channel,
+          event_type: values.eventType, symbol: values.symbol,
+          payload: tx.json(values.payload), state_before: values.stateBefore == null ? null : tx.json(values.stateBefore),
+          state_after: values.stateAfter == null ? null : tx.json(values.stateAfter),
+          reward: values.reward, prediction_error: values.predictionError,
+          confidence: values.confidence, quality_score: values.qualityScore,
+          proposal_source: values.proposalSource, extractor_name: values.extractorName,
+          extractor_version: values.extractorVersion,
+          verification_state: values.verificationState, source_hash: values.sourceHash,
+          novelty: values.novelty, priority_score: values.priorityScore,
+          metadata: tx.json(values.metadata), created_by: job.created_by,
+          created_at: now, updated_at: now, deleted_at: null,
+        };
+      });
       await tx`INSERT INTO memory.events ${tx(rows,
         'id', 'event_uid', 'source_id', 'experience_id', 'ingestion_batch_id', 'batch_position',
         'occurred_at', 'sequence_time', 'duration', 'modality', 'channel', 'event_type', 'symbol',

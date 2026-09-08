@@ -3,7 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { verifyAccessToken } from './tokens.js';
 import { hashSecret } from './secrets.js';
 import { db } from '../db/client.js';
-import { apiKeys, users } from '../db/schema/index.js';
+import { apiKeys, users, workspaceMemberships, workspaces } from '../db/schema/index.js';
 
 function authenticationError(c, code = 'INVALID_TOKEN') {
   const missing = code === 'AUTHENTICATION_REQUIRED';
@@ -28,6 +28,37 @@ async function findActiveUser(userId) {
   return user;
 }
 
+export async function findActiveWorkspaceMembership(userId, executor = db) {
+  const [membership] = await executor.select({
+    workspaceId: workspaces.id,
+    workspaceSlug: workspaces.slug,
+    workspaceName: workspaces.name,
+    role: workspaceMemberships.role,
+  })
+    .from(workspaceMemberships)
+    .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
+    .where(and(
+      eq(workspaceMemberships.userId, userId),
+      eq(workspaceMemberships.status, 'active'),
+      eq(workspaces.status, 'active'),
+      isNull(workspaces.deletedAt),
+    ))
+    .limit(1);
+  return membership || null;
+}
+
+function workspaceAccessError(c) {
+  return c.json({
+    data: null,
+    meta: {},
+    error: {
+      code: 'WORKSPACE_ACCESS_REQUIRED',
+      message: 'An active workspace membership is required.',
+      details: [],
+    },
+  }, 403);
+}
+
 async function authenticateApiKey(token) {
   const [apiKey] = await db.select()
     .from(apiKeys)
@@ -43,12 +74,15 @@ async function authenticateApiKey(token) {
     .set({ lastUsedAt: new Date() })
     .where(and(eq(apiKeys.id, apiKey.id), isNull(apiKeys.revokedAt)));
 
+  const workspace = await findActiveWorkspaceMembership(user.id);
+
   return {
     user,
+    workspace,
     auth: {
       sub: user.id,
       email: user.email,
-      role: user.role,
+      role: workspace?.role ?? null,
       locale: user.locale || 'ja',
       token_type: 'api_key',
       api_key_id: apiKey.id,
@@ -71,8 +105,10 @@ function createAuthMiddleware({ allowApiKeys }) {
 
       const result = await authenticateApiKey(token);
       if (!result) return authenticationError(c);
+      if (!result.workspace) return workspaceAccessError(c);
       c.set('auth', result.auth);
       c.set('authUser', result.user);
+      c.set('workspace', result.workspace);
       c.set('apiKeySecret', token);
       return next();
     }
@@ -87,8 +123,12 @@ function createAuthMiddleware({ allowApiKeys }) {
     const user = await findActiveUser(payload.sub);
     if (!user) return authenticationError(c);
 
-    c.set('auth', { ...payload, scopes: ['*'] });
+    const workspace = await findActiveWorkspaceMembership(user.id);
+    if (!workspace) return workspaceAccessError(c);
+
+    c.set('auth', { ...payload, role: workspace.role, scopes: ['*'] });
     c.set('authUser', user);
+    c.set('workspace', workspace);
     return next();
   });
 }
@@ -132,10 +172,7 @@ export function requireScopes(...requiredScopes) {
 
 export function requireRoles(...allowedRoles) {
   return createMiddleware(async (c, next) => {
-    const auth = c.get('auth');
-    if (auth?.token_type === 'api_key') return next();
-
-    const role = c.get('authUser')?.role;
+    const role = c.get('workspace')?.role;
     if (!hasRequiredRole(role, allowedRoles)) {
       return c.json({
         data: null,

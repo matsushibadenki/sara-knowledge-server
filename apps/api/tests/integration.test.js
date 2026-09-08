@@ -36,6 +36,7 @@ import {
   trainingModels,
   trainingRuns,
   users,
+  workspaceMemberships,
 } from '../src/db/schema/index.js';
 import { hashSecret } from '../src/auth/secrets.js';
 import { hashPassword } from '../src/auth/passwords.js';
@@ -73,6 +74,7 @@ const createdMemoryAliasIds = [];
 const createdMemoryEvidenceIds = [];
 const createdMemoryDecisionIds = [];
 const rateLimitedEmails = [];
+const workspaceId = '00000000-0000-4000-8000-000000000001';
 
 async function request(path, options = {}) {
   const response = await app.request(path, options);
@@ -195,6 +197,7 @@ afterAll(async () => {
     await db.delete(apiKeys).where(inArray(apiKeys.id, createdApiKeyIds));
   }
   if (createdUserIds.length > 0) {
+    await db.delete(workspaceMemberships).where(inArray(workspaceMemberships.userId, createdUserIds));
     await db.delete(users).where(inArray(users.id, createdUserIds));
   }
   for (const email of rateLimitedEmails) await clearLoginAttempts(email);
@@ -212,6 +215,8 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
     }),
   });
   expect(login.response.status).toBe(200);
+  expect(login.body.data.workspace.id).toBe(workspaceId);
+  expect(login.body.data.workspace.role).toBe('admin');
   const accessToken = login.body.data.access_token;
   issuedRefreshTokens.push(login.body.data.refresh_token);
   const headers = {
@@ -230,6 +235,7 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
     role: 'viewer',
     passwordHash: await hashPassword(viewerPassword),
   });
+  await db.insert(workspaceMemberships).values({ workspaceId, userId: viewerId, role: 'viewer' });
   createdUserIds.push(viewerId);
 
   await consumeLoginAttempt(viewerEmail);
@@ -254,6 +260,67 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
     Authorization: `Bearer ${viewerToken}`,
     'Content-Type': 'application/json',
   };
+
+  const editorId = crypto.randomUUID();
+  const editorEmail = `editor-${editorId}@example.com`;
+  await db.insert(users).values({
+    id: editorId,
+    email: editorEmail,
+    displayName: 'Integration Editor',
+    status: 'active',
+    role: 'editor',
+    passwordHash: await hashPassword('editor-test-password'),
+  });
+  await db.insert(workspaceMemberships).values({ workspaceId, userId: editorId, role: 'editor' });
+  createdUserIds.push(editorId);
+  const editorToken = await signAccessToken({
+    id: editorId,
+    email: editorEmail,
+    role: 'editor',
+    locale: 'ja',
+  });
+  const editorHeaders = {
+    Authorization: `Bearer ${editorToken}`,
+    'Content-Type': 'application/json',
+  };
+
+  const nonMemberId = crypto.randomUUID();
+  const nonMemberEmail = `non-member-${nonMemberId}@example.com`;
+  await db.insert(users).values({
+    id: nonMemberId,
+    email: nonMemberEmail,
+    displayName: 'Integration Non-member',
+    status: 'active',
+    role: 'viewer',
+  });
+  createdUserIds.push(nonMemberId);
+  const nonMemberToken = await signAccessToken({
+    id: nonMemberId,
+    email: nonMemberEmail,
+    role: 'viewer',
+    locale: 'en',
+  });
+  const nonMemberRead = await request('/api/v1/records', {
+    headers: { Authorization: `Bearer ${nonMemberToken}` },
+  });
+  expect(nonMemberRead.response.status).toBe(403);
+  expect(nonMemberRead.body.error.code).toBe('WORKSPACE_ACCESS_REQUIRED');
+
+  const nonMemberApiKey = `sara_${crypto.randomUUID().replaceAll('-', '')}`;
+  const [storedNonMemberApiKey] = await db.insert(apiKeys).values({
+    userId: nonMemberId,
+    name: 'Non-member integration key',
+    keyPrefix: nonMemberApiKey.slice(0, 17),
+    keyHash: await hashSecret(nonMemberApiKey),
+    scopes: ['records:read'],
+  }).returning({ id: apiKeys.id });
+  createdApiKeyIds.push(storedNonMemberApiKey.id);
+  const nonMemberApiKeyRead = await request('/api/v1/records', {
+    headers: { Authorization: `Bearer ${nonMemberApiKey}` },
+  });
+  expect(nonMemberApiKeyRead.response.status).toBe(403);
+  expect(nonMemberApiKeyRead.body.error.code).toBe('WORKSPACE_ACCESS_REQUIRED');
+
   const viewerRead = await request('/api/v1/records', { headers: viewerHeaders });
   expect(viewerRead.response.status).toBe(200);
   const viewerSourceRead = await request('/api/v1/sources', { headers: viewerHeaders });
@@ -431,6 +498,18 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   expect(missingSourceRecord.response.status).toBe(404);
   expect(missingSourceRecord.body.error.code).toBe('SOURCE_NOT_FOUND');
 
+  const directApprovedRecord = await request('/api/v1/records', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      record_type: 'plain_text',
+      status: 'approved',
+      content: { text: 'must pass review first' },
+    }),
+  });
+  expect(directApprovedRecord.response.status).toBe(422);
+  expect(directApprovedRecord.body.error.code).toBe('REVIEW_STATUS_REQUIRED');
+
   const created = await request('/api/v1/records', {
     method: 'POST',
     headers,
@@ -581,6 +660,24 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   );
   expect(approvedReview.response.status).toBe(200);
   expect(approvedReview.body.data.status).toBe('approved');
+  const directlyReapproved = await request(`/api/v1/records/${recordId}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ expected_version: 3, status: 'approved', title: 'Bypass review' }),
+  });
+  expect(directlyReapproved.response.status).toBe(422);
+  expect(directlyReapproved.body.error.code).toBe('REVIEW_STATUS_REQUIRED');
+  const revisedAfterApproval = await request(`/api/v1/records/${recordId}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({
+      expected_version: 3,
+      content: { instruction: 'ping', output: 'PONG' },
+      change_summary: 'Correct approved content',
+    }),
+  });
+  expect(revisedAfterApproval.response.status).toBe(200);
+  expect(revisedAfterApproval.body.data.status).toBe('draft');
+  expect(revisedAfterApproval.body.data.current_version.version_number).toBe(4);
+  expect(revisedAfterApproval.body.data.current_version_id).not.toBe(submittedReview.body.data.record_version_id);
   const reviewHistory = await request(`/api/v1/records/${recordId}/reviews`, { headers });
   expect(reviewHistory.response.status).toBe(200);
   expect(reviewHistory.body.data[0].reviewed_by).toBe(login.body.data.user.id);
@@ -592,6 +689,7 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   const jsonlContent = [
     JSON.stringify({ instruction: 'Say hello', output: 'Hello', title: 'Imported instruction' }),
     JSON.stringify({ record_type: 'unsupported_type', content: { invalid: true } }),
+    JSON.stringify({ record_type: 'plain_text', status: 'approved', content: { invalid: 'review bypass' } }),
     JSON.stringify({ record_type: 'plain_text', title: 'Imported plain text', text: 'Knowledge survives models.' }),
   ].join('\n');
   const importKey = `integration-${crypto.randomUUID()}`;
@@ -605,7 +703,7 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   expect(importedJsonl.response.status).toBe(201);
   expect(importedJsonl.body.data.status).toBe('completed_with_errors');
   expect(importedJsonl.body.data.succeeded_count).toBe(2);
-  expect(importedJsonl.body.data.failed_count).toBe(1);
+  expect(importedJsonl.body.data.failed_count).toBe(2);
   expect(importedJsonl.body.data.raw_content).toBeUndefined();
   createdImportJobIds.push(importedJsonl.body.data.id);
   createdSourceIds.push(importedJsonl.body.data.source_id);
@@ -626,8 +724,8 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
 
   const jsonlDetail = await request(`/api/v1/imports/${importedJsonl.body.data.id}`, { headers });
   expect(jsonlDetail.response.status).toBe(200);
-  expect(jsonlDetail.body.data.items).toHaveLength(3);
-  expect(jsonlDetail.body.data.items.filter((item) => item.status === 'failed')).toHaveLength(1);
+  expect(jsonlDetail.body.data.items).toHaveLength(4);
+  expect(jsonlDetail.body.data.items.filter((item) => item.status === 'failed')).toHaveLength(2);
   createdRecordIds.push(...jsonlDetail.body.data.items.map((item) => item.record_id).filter(Boolean));
 
   const importedJson = await request('/api/v1/imports', {
@@ -695,6 +793,8 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
       format: 'jsonl',
       content: [1, 2, 3].map((number) => JSON.stringify({
         record_type: 'plain_text', title: `Async imported ${number}`, text: `async-${number}`,
+      })).concat(JSON.stringify({
+        record_type: 'plain_text', status: 'approved', title: 'Async review bypass', text: 'invalid',
       })).join('\n'),
       idempotency_key: `async-import-${crypto.randomUUID()}`,
       file_name: 'async-integration.jsonl',
@@ -714,9 +814,11 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
     if (['completed', 'completed_with_errors', 'failed'].includes(asyncImportDetail.body.data.status)) break;
     await Bun.sleep(100);
   }
-  expect(asyncImportDetail.body.data.status).toBe('completed');
-  expect(asyncImportDetail.body.data.processed_count).toBe(3);
-  expect(asyncImportDetail.body.data.items).toHaveLength(3);
+  expect(asyncImportDetail.body.data.status).toBe('completed_with_errors');
+  expect(asyncImportDetail.body.data.processed_count).toBe(4);
+  expect(asyncImportDetail.body.data.succeeded_count).toBe(3);
+  expect(asyncImportDetail.body.data.failed_count).toBe(1);
+  expect(asyncImportDetail.body.data.items).toHaveLength(4);
   createdRecordIds.push(...asyncImportDetail.body.data.items.map((item) => item.record_id).filter(Boolean));
 
   const asyncExport = await request('/api/v1/exports/async', {
@@ -1249,6 +1351,53 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   expect(entity.response.status).toBe(201);
   createdMemoryEntityIds.push(entity.body.data.id);
 
+  const editorEntity = await request('/api/v1/memory/entities', {
+    method: 'POST', headers: editorHeaders,
+    body: JSON.stringify({
+      entity_uid: `editor-entity-${crypto.randomUUID()}`,
+      entity_type: 'document', canonical_name: 'shared record reference',
+      proposal_source: 'human', source_id: sourceId,
+    }),
+  });
+  expect(editorEntity.response.status).toBe(201);
+  createdMemoryEntityIds.push(editorEntity.body.data.id);
+
+  const editorRecordRelation = await request('/api/v1/memory/relations', {
+    method: 'POST', headers: editorHeaders,
+    body: JSON.stringify({
+      relation_uid: `editor-relation-${crypto.randomUUID()}`,
+      source_type: 'entity', source_id: editorEntity.body.data.id,
+      relation_type: 'derived_from', target_type: 'record', target_id: recordId,
+      proposal_source: 'human', verification_state: 'candidate',
+    }),
+  });
+  expect(editorRecordRelation.response.status).toBe(201);
+  createdMemoryRelationIds.push(editorRecordRelation.body.data.id);
+
+  const editorRecordEvidence = await request(`/api/v1/memory/relations/${editorRecordRelation.body.data.id}/evidence`, {
+    method: 'POST', headers: editorHeaders,
+    body: JSON.stringify({
+      expected_revision: editorRecordRelation.body.data.revision,
+      evidence_uid: `editor-record-evidence-${crypto.randomUUID()}`,
+      evidence_type: 'record', reference_type: 'record', reference_id: recordId,
+      supports: true,
+    }),
+  });
+  expect(editorRecordEvidence.response.status).toBe(201);
+  createdMemoryEvidenceIds.push(editorRecordEvidence.body.data.evidence.id);
+
+  const editorCanReferenceWorkspaceMemory = await request('/api/v1/memory/relations', {
+    method: 'POST', headers: editorHeaders,
+    body: JSON.stringify({
+      relation_uid: `private-relation-${crypto.randomUUID()}`,
+      source_type: 'entity', source_id: editorEntity.body.data.id,
+      relation_type: 'references', target_type: 'entity', target_id: entity.body.data.id,
+      proposal_source: 'human',
+    }),
+  });
+  expect(editorCanReferenceWorkspaceMemory.response.status).toBe(201);
+  createdMemoryRelationIds.push(editorCanReferenceWorkspaceMemory.body.data.id);
+
   const entityAlias = await request(`/api/v1/memory/entities/${entity.body.data.id}/aliases`, {
     method: 'POST', headers,
     body: JSON.stringify({
@@ -1377,6 +1526,7 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   const supportingEvidence = await request(`/api/v1/memory/relations/${relation.body.data.id}/evidence`, {
     method: 'POST', headers,
     body: JSON.stringify({
+      expected_revision: relation.body.data.revision,
       evidence_uid: `evidence-${crypto.randomUUID()}`, evidence_type: 'observation',
       reference_type: 'event', reference_id: memoryEvent.body.data.id,
       supports: true, weight: 1.2, details: { note: 'Bell observation supports association' },
@@ -1388,6 +1538,7 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   const duplicateEvidence = await request(`/api/v1/memory/relations/${relation.body.data.id}/evidence`, {
     method: 'POST', headers,
     body: JSON.stringify({
+      expected_revision: supportingEvidence.body.data.relation.revision,
       evidence_uid: supportingEvidence.body.data.evidence.evidence_uid,
       evidence_type: 'observation', reference_type: 'event', reference_id: memoryEvent.body.data.id,
       supports: true,
@@ -1397,6 +1548,7 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   const counterEvidence = await request(`/api/v1/memory/relations/${relation.body.data.id}/evidence`, {
     method: 'POST', headers,
     body: JSON.stringify({
+      expected_revision: supportingEvidence.body.data.relation.revision,
       evidence_uid: `counter-${crypto.randomUUID()}`, evidence_type: 'external_report',
       reference_type: 'external', supports: false, weight: 0.5,
       details: { url: 'https://example.invalid/counterexample' },
@@ -1412,39 +1564,72 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
 
   const neighbors = await request(`/api/v1/memory/nodes/entity/${entity.body.data.id}/neighbors`, { headers });
   expect(neighbors.response.status).toBe(200);
-  expect(neighbors.body.data).toHaveLength(1);
+  expect(neighbors.body.data).toHaveLength(2);
   expect(neighbors.body.data[0].target_id).toBe(concept.body.data.id);
 
   const directVerificationPatch = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, {
     method: 'PATCH', headers,
-    body: JSON.stringify({ verification_state: 'verified', evidence_count: 2 }),
+    body: JSON.stringify({ expected_revision: concept.body.data.revision, verification_state: 'verified', evidence_count: 2 }),
   });
   expect(directVerificationPatch.response.status).toBe(400);
   const updatedConceptEvidence = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, {
-    method: 'PATCH', headers, body: JSON.stringify({ evidence_count: 2 }),
+    method: 'PATCH', headers, body: JSON.stringify({ expected_revision: concept.body.data.revision, evidence_count: 2 }),
   });
   expect(updatedConceptEvidence.response.status).toBe(200);
+  expect(updatedConceptEvidence.body.data.revision).toBe(2);
   expect(updatedConceptEvidence.body.data.event_pattern.sequence).toEqual(['bell', 'meal']);
 
   const verifiedConcept = await request(`/api/v1/memory/verification/concept/${concept.body.data.id}`, {
     method: 'POST', headers,
-    body: JSON.stringify({ expected_state: 'candidate', state: 'verified', notes: 'Confirmed by integration reviewer' }),
+    body: JSON.stringify({ expected_revision: updatedConceptEvidence.body.data.revision, expected_state: 'candidate', state: 'verified', notes: 'Confirmed by integration reviewer' }),
   });
   expect(verifiedConcept.response.status).toBe(200);
+  expect(verifiedConcept.body.data.revision).toBe(3);
   expect(verifiedConcept.body.data.verification_state).toBe('verified');
+  expect(verifiedConcept.body.data.decision.target_revision).toBe(3);
+  expect(verifiedConcept.body.data.decision.target_snapshot.event_pattern.sequence).toEqual(['bell', 'meal']);
+  expect(verifiedConcept.body.data.decision.target_snapshot.verification_state).toBe('verified');
   createdMemoryDecisionIds.push(verifiedConcept.body.data.decision.id);
   const repeatedVerification = await request(`/api/v1/memory/verification/concept/${concept.body.data.id}`, {
     method: 'POST', headers,
-    body: JSON.stringify({ expected_state: 'candidate', state: 'rejected' }),
+    body: JSON.stringify({ expected_revision: verifiedConcept.body.data.revision, expected_state: 'candidate', state: 'rejected' }),
   });
   expect(repeatedVerification.response.status).toBe(409);
+  expect(repeatedVerification.body.error.code).toBe('VERIFICATION_STATE_CONFLICT');
+
+  const revisedVerifiedConcept = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({
+      expected_revision: verifiedConcept.body.data.revision,
+      event_pattern: { sequence: ['bell', 'meal', 'salivation'] },
+    }),
+  });
+  expect(revisedVerifiedConcept.response.status).toBe(200);
+  expect(revisedVerifiedConcept.body.data.revision).toBe(4);
+  expect(revisedVerifiedConcept.body.data.verification_state).toBe('candidate');
+
+  const concurrentConceptUpdates = await Promise.all([
+    request(`/api/v1/memory/concepts/${concept.body.data.id}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ expected_revision: 4, utility_score: 0.6 }),
+    }),
+    request(`/api/v1/memory/concepts/${concept.body.data.id}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ expected_revision: 4, utility_score: 0.7 }),
+    }),
+  ]);
+  expect(concurrentConceptUpdates.map((result) => result.response.status).sort()).toEqual([200, 409]);
+  expect(concurrentConceptUpdates.find((result) => result.response.status === 409).body.error.code).toBe('REVISION_CONFLICT');
+
   const verificationHistory = await request(`/api/v1/memory/verification/concept/${concept.body.data.id}`, { headers });
   expect(verificationHistory.response.status).toBe(200);
   expect(verificationHistory.body.data).toHaveLength(1);
   expect(verificationHistory.body.data[0].to_state).toBe('verified');
+  expect(verificationHistory.body.data[0].target_revision).toBe(3);
+  expect(verificationHistory.body.data[0].target_snapshot.event_pattern.sequence).toEqual(['bell', 'meal']);
 
   const viewerMemoryRead = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, { headers: viewerHeaders });
-  expect(viewerMemoryRead.response.status).toBe(404);
+  expect(viewerMemoryRead.response.status).toBe(200);
 
   const referencedConceptDelete = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, { method: 'DELETE', headers });
   expect(referencedConceptDelete.response.status).toBe(409);
@@ -1479,7 +1664,7 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
     { headers },
   );
   expect(recordAudits.response.status).toBe(200);
-  expect(recordAudits.body.data).toHaveLength(7);
+  expect(recordAudits.body.data).toHaveLength(8);
   expect(new Set(recordAudits.body.data.map((entry) => entry.action)))
     .toEqual(new Set(['create', 'update', 'delete', 'restore', 'submit_review', 'approve']));
   expect(JSON.stringify(recordAudits.body.data)).not.toContain('pong');

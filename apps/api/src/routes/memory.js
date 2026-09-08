@@ -1,11 +1,16 @@
 import { Hono } from 'hono';
 import { and, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import {
+  memoryEventAsyncSchema,
+  memoryEventBulkSchema,
+  memoryEventSchema,
+  memoryEventValues,
+} from '@sara-knowledge/domain-contracts/memory-events';
 import { requireAuth, requireRoles, requireScopes, requireUserAuth } from '../auth/middleware.js';
 import { requireSignedApiKeyRequest } from '../auth/hmac.js';
 import { db } from '../db/client.js';
 import {
-  datasetSnapshots,
   memoryConcepts,
   memoryEntities,
   memoryEntityAliases,
@@ -16,11 +21,10 @@ import {
   memoryRelationEvidence,
   memoryRelations,
   memoryVerificationDecisions,
-  records,
   sources,
-  trainingModels,
 } from '../db/schema/index.js';
 import { enqueueBackgroundJob, storeObject } from '../services/background-jobs.js';
+import { findAccessibleResource } from '../services/resource-access.js';
 
 const uuidSchema = z.string().uuid();
 const jsonObject = z.record(z.string(), z.unknown());
@@ -42,33 +46,6 @@ const experienceSchema = z.object({
   quality_score: probability.default(0.5),
   curriculum_level: z.string().trim().min(1).max(100).default('raw'),
   split_name: z.enum(['unsplit', 'train', 'validation', 'test', 'holdout', 'custom']).default('unsplit'),
-  metadata: jsonObject.default({}),
-});
-const eventSchema = z.object({
-  event_uid: z.string().trim().min(1).max(200),
-  source_id: uuidSchema.nullable().optional(),
-  experience_id: uuidSchema.nullable().optional(),
-  occurred_at: nullableDate,
-  sequence_time: z.number().finite().nullable().optional(),
-  duration: z.number().finite().min(0).nullable().optional(),
-  modality: z.string().trim().min(1).max(100),
-  channel: z.string().max(200).nullable().optional(),
-  event_type: z.string().trim().min(1).max(200),
-  symbol: z.string().max(500).nullable().optional(),
-  payload: jsonObject.default({}),
-  state_before: jsonObject.nullable().optional(),
-  state_after: jsonObject.nullable().optional(),
-  reward: z.number().finite().default(0),
-  prediction_error: z.number().finite().default(0),
-  confidence: probability.default(1),
-  quality_score: probability.default(0.5),
-  proposal_source: z.string().trim().min(1).max(200),
-  extractor_name: z.string().max(200).nullable().optional(),
-  extractor_version: z.string().max(200).nullable().optional(),
-  verification_state: initialVerificationState.default('unverified'),
-  source_hash: z.string().max(200).nullable().optional(),
-  novelty: probability.default(0),
-  priority_score: z.number().finite().default(0),
   metadata: jsonObject.default({}),
 });
 const entitySchema = z.object({
@@ -127,6 +104,7 @@ const aliasSchema = z.object({
   verification_state: initialVerificationState.default('unverified'),
 });
 const evidenceSchema = z.object({
+  expected_revision: z.number().int().positive(),
   evidence_uid: z.string().trim().min(1).max(200),
   evidence_type: z.string().trim().min(1).max(200),
   reference_type: z.enum(['source', 'record', 'event', 'experience', 'entity', 'concept', 'dataset_snapshot', 'model', 'external']),
@@ -139,19 +117,12 @@ const evidenceSchema = z.object({
   if (value.reference_type !== 'external' && !value.reference_id) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['reference_id'], message: 'Internal evidence requires reference_id.' });
 });
 const verificationSchema = z.object({
+  expected_revision: z.number().int().positive(),
   expected_state: verificationState,
   state: z.enum(['candidate', 'verified', 'rejected']),
   notes: z.string().max(10000).nullable().optional(),
   metadata: jsonObject.default({}),
 }).refine((value) => value.expected_state !== value.state, { path: ['state'], message: 'Verification state must change.' });
-const eventBulkSchema = z.object({
-  batch_uid: z.string().trim().min(1).max(200),
-  events: z.array(eventSchema).min(1).max(500),
-}).strict();
-const eventAsyncSchema = z.object({
-  batch_uid: z.string().trim().min(1).max(200),
-  events: z.array(eventSchema).min(501).max(10000),
-}).strict();
 const traverseSchema = z.object({
   start_nodes: z.array(z.object({ type: nodeType, id: uuidSchema }).strict()).min(1).max(10),
   relation_types: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
@@ -164,7 +135,9 @@ const traverseSchema = z.object({
 }).strict();
 
 function patchSchema(schema) {
-  return schema.strict().partial().refine((value) => Object.keys(value).length > 0, 'At least one field is required.');
+  return schema.strict().partial().extend({
+    expected_revision: z.number().int().positive(),
+  }).refine((value) => Object.keys(value).some((key) => key !== 'expected_revision'), 'At least one mutable field is required.');
 }
 
 function errorResponse(c, status, code, message, details = []) {
@@ -172,7 +145,7 @@ function errorResponse(c, status, code, message, details = []) {
 }
 
 const common = (item) => ({
-  id: item.id, created_by: item.createdBy, created_at: item.createdAt,
+  id: item.id, revision: item.revision, created_by: item.createdBy, created_at: item.createdAt,
   updated_at: item.updatedAt, deleted_at: item.deletedAt,
 });
 const serializers = {
@@ -184,7 +157,7 @@ const serializers = {
 };
 const serializeAlias = (item) => ({ ...common(item), entity_id: item.entityId, alias: item.alias, normalized_alias: item.normalizedAlias, language_code: item.languageCode, alias_type: item.aliasType, confidence: item.confidence, proposal_source: item.proposalSource, verification_state: item.verificationState });
 const serializeEvidence = (item) => ({ id: item.id, evidence_uid: item.evidenceUid, relation_id: item.relationId, evidence_type: item.evidenceType, reference_type: item.referenceType, reference_id: item.referenceId, supports: item.supports, weight: item.weight, details: item.details, created_by: item.createdBy, created_at: item.createdAt });
-const serializeDecision = (item) => ({ id: item.id, target_type: item.targetType, target_id: item.targetId, from_state: item.fromState, to_state: item.toState, notes: item.notes, metadata: item.metadata, decided_by: item.decidedBy, created_at: item.createdAt });
+const serializeDecision = (item) => ({ id: item.id, target_type: item.targetType, target_id: item.targetId, target_revision: item.targetRevision, target_snapshot: item.targetSnapshot, from_state: item.fromState, to_state: item.toState, notes: item.notes, metadata: item.metadata, decided_by: item.decidedBy, created_at: item.createdAt });
 const serializeEventJob = (item) => ({
   id: item.id, batch_uid: item.batchUid, content_hash: item.contentHash, status: item.status,
   event_count: item.eventCount, processed_count: item.processedCount,
@@ -195,41 +168,29 @@ const serializeEventJob = (item) => ({
 
 const mappings = {
   experience: (v) => ({ experienceUid: v.experience_uid, sourceId: v.source_id ?? null, title: v.title ?? null, stateBefore: v.state_before ?? null, eventSummary: v.event_summary, stateAfter: v.state_after ?? null, reward: v.reward, predictionError: v.prediction_error, qualityScore: v.quality_score, curriculumLevel: v.curriculum_level, splitName: v.split_name, metadata: v.metadata }),
-  event: (v) => ({ eventUid: v.event_uid, sourceId: v.source_id ?? null, experienceId: v.experience_id ?? null, occurredAt: v.occurred_at ?? null, sequenceTime: v.sequence_time ?? null, duration: v.duration ?? null, modality: v.modality, channel: v.channel ?? null, eventType: v.event_type, symbol: v.symbol ?? null, payload: v.payload, stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, reward: v.reward, predictionError: v.prediction_error, confidence: v.confidence, qualityScore: v.quality_score, proposalSource: v.proposal_source, extractorName: v.extractor_name ?? null, extractorVersion: v.extractor_version ?? null, verificationState: v.verification_state, sourceHash: v.source_hash ?? null, novelty: v.novelty, priorityScore: v.priority_score, metadata: v.metadata }),
+  event: memoryEventValues,
   entity: (v) => ({ entityUid: v.entity_uid, entityType: v.entity_type, canonicalName: v.canonical_name ?? null, description: v.description ?? null, properties: v.properties, confidence: v.confidence, verificationState: v.verification_state, proposalSource: v.proposal_source, sourceId: v.source_id ?? null }),
   concept: (v) => ({ conceptUid: v.concept_uid, label: v.label ?? null, conceptType: v.concept_type, description: v.description ?? null, evidenceCount: v.evidence_count, contradictionCount: v.contradiction_count, verificationState: v.verification_state, proposalSource: v.proposal_source, utilityScore: v.utility_score, eventPattern: v.event_pattern ?? null, payload: v.payload, sourceId: v.source_id ?? null }),
   relation: (v) => ({ relationUid: v.relation_uid, sourceType: v.source_type, sourceId: v.source_id, relationType: v.relation_type, targetType: v.target_type, targetId: v.target_id, strength: v.strength, confidence: v.confidence, evidenceCount: v.evidence_count, counterexampleCount: v.counterexample_count, minDelayMs: v.min_delay_ms ?? null, maxDelayMs: v.max_delay_ms ?? null, validFrom: v.valid_from ?? null, validUntil: v.valid_until ?? null, expiresAt: v.expires_at ?? null, verificationState: v.verification_state, proposalSource: v.proposal_source, context: v.context, payload: v.payload }),
 };
 
-async function ownedActive(table, id, ownerId) {
-  const [item] = await db.select().from(table).where(and(eq(table.id, id), eq(table.createdBy, ownerId), isNull(table.deletedAt))).limit(1);
+async function activeResource(table, id) {
+  const [item] = await db.select().from(table).where(and(eq(table.id, id), isNull(table.deletedAt))).limit(1);
   return item;
 }
 
 async function validateSource(sourceId, ownerId) {
   if (!sourceId) return true;
-  const [item] = await db.select({ id: sources.id }).from(sources)
-    .where(and(eq(sources.id, sourceId), eq(sources.createdBy, ownerId), isNull(sources.deletedAt))).limit(1);
-  return Boolean(item);
+  return Boolean(await findAccessibleResource(db, 'source', sourceId, ownerId));
 }
-
-const nodeTables = {
-  event: memoryEvents, experience: memoryExperiences, entity: memoryEntities, concept: memoryConcepts,
-  record: records, dataset_snapshot: datasetSnapshots, model: trainingModels,
-};
 
 async function validateNode(type, id, ownerId) {
-  const table = nodeTables[type];
-  const conditions = [eq(table.id, id), eq(table.createdBy, ownerId)];
-  if (table.deletedAt) conditions.push(isNull(table.deletedAt));
-  if (type === 'dataset_snapshot') conditions.push(eq(datasetSnapshots.status, 'completed'));
-  const [item] = await db.select({ id: table.id }).from(table).where(and(...conditions)).limit(1);
-  return Boolean(item);
+  return Boolean(await findAccessibleResource(db, type, id, ownerId));
 }
 
-async function nodeIsInUse(type, id, ownerId) {
+async function nodeIsInUse(type, id) {
   const [relation] = await db.select({ id: memoryRelations.id }).from(memoryRelations).where(and(
-    eq(memoryRelations.createdBy, ownerId), isNull(memoryRelations.deletedAt),
+    isNull(memoryRelations.deletedAt),
     or(
       and(eq(memoryRelations.sourceType, type), eq(memoryRelations.sourceId, id)),
       and(eq(memoryRelations.targetType, type), eq(memoryRelations.targetId, id)),
@@ -257,7 +218,7 @@ function registerCrud({ path, singular, table, schema, updateSchema, mapper, val
   memoryRoutes.get(`/${path}`, requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
     const query = listSchema.safeParse({ limit: c.req.query('limit') });
     if (!query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', `${singular} query is invalid.`, query.error.issues);
-    const items = await db.select().from(table).where(and(eq(table.createdBy, c.get('auth').sub), isNull(table.deletedAt)))
+    const items = await db.select().from(table).where(isNull(table.deletedAt))
       .orderBy(desc(table.createdAt), desc(table.id)).limit(query.data.limit);
     return c.json({ data: items.map(serialize), meta: { limit: query.data.limit }, error: null });
   });
@@ -280,7 +241,7 @@ function registerCrud({ path, singular, table, schema, updateSchema, mapper, val
   memoryRoutes.get(`/${path}/:id`, requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
     const id = uuidSchema.safeParse(c.req.param('id'));
     if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', `${singular} ID must be a UUID.`);
-    const item = await ownedActive(table, id.data, c.get('auth').sub);
+    const item = await activeResource(table, id.data);
     if (!item) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', `${singular} was not found.`);
     return c.json({ data: serialize(item), meta: {}, error: null });
   });
@@ -290,13 +251,31 @@ function registerCrud({ path, singular, table, schema, updateSchema, mapper, val
     const input = (updateSchema || patchSchema(schema)).safeParse(await c.req.json().catch(() => null));
     if (!id.success || !input.success) return errorResponse(c, 400, 'VALIDATION_ERROR', `${singular} update is invalid.`, input.error?.issues || []);
     const ownerId = c.get('auth').sub;
-    const current = await ownedActive(table, id.data, ownerId);
+    const current = await activeResource(table, id.data);
     if (!current) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', `${singular} was not found.`);
+    if (current.revision !== input.data.expected_revision) {
+      return errorResponse(c, 409, 'REVISION_CONFLICT', 'The memory object changed concurrently.', [{
+        expected_revision: input.data.expected_revision, current_revision: current.revision,
+      }]);
+    }
     const validationError = validate ? await validate(input.data, current, ownerId) : null;
     if (validationError) return errorResponse(c, validationError.status, validationError.code, validationError.message);
     try {
-      const [updated] = await db.update(table).set({ ...mapper({ ...serialize(current), ...input.data }), updatedAt: new Date() })
-        .where(and(eq(table.id, current.id), isNull(table.deletedAt))).returning();
+      const verificationUpdate = table.verificationState && ['verified', 'rejected'].includes(current.verificationState)
+        ? { verificationState: 'candidate' }
+        : {};
+      const [updated] = await db.update(table).set({
+        ...mapper({ ...serialize(current), ...input.data }), ...verificationUpdate,
+        revision: sql`${table.revision} + 1`, updatedAt: new Date(),
+      }).where(and(
+        eq(table.id, current.id), eq(table.revision, input.data.expected_revision), isNull(table.deletedAt),
+      )).returning();
+      if (!updated) {
+        const latest = await activeResource(table, current.id);
+        return errorResponse(c, 409, 'REVISION_CONFLICT', 'The memory object changed concurrently.', [{
+          expected_revision: input.data.expected_revision, current_revision: latest?.revision ?? null,
+        }]);
+      }
       return c.json({ data: serialize(updated), meta: {}, error: null });
     } catch (error) {
       if (error?.code === '23505') return errorResponse(c, 409, 'UID_CONFLICT', `This ${singular}_uid already exists.`);
@@ -307,11 +286,11 @@ function registerCrud({ path, singular, table, schema, updateSchema, mapper, val
   memoryRoutes.delete(`/${path}/:id`, requireScopes('memory:write'), requireRoles('admin', 'editor'), async (c) => {
     const id = uuidSchema.safeParse(c.req.param('id'));
     if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', `${singular} ID must be a UUID.`);
-    if (singular !== 'relation' && await nodeIsInUse(singular, id.data, c.get('auth').sub)) {
+    if (singular !== 'relation' && await nodeIsInUse(singular, id.data)) {
       return errorResponse(c, 409, 'MEMORY_NODE_IN_USE', 'Remove or retire active references before deleting this memory node.');
     }
     const [deleted] = await db.update(table).set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(table.id, id.data), eq(table.createdBy, c.get('auth').sub), isNull(table.deletedAt))).returning();
+      .where(and(eq(table.id, id.data), isNull(table.deletedAt))).returning();
     if (!deleted) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', `${singular} was not found.`);
     return c.json({ data: serialize(deleted), meta: {}, error: null });
   });
@@ -319,7 +298,7 @@ function registerCrud({ path, singular, table, schema, updateSchema, mapper, val
 
 const sourceValidator = (field) => async (input, current, ownerId) => {
   const sourceId = input[field] === undefined ? current?.sourceId : input[field];
-  return await validateSource(sourceId, ownerId) ? null : { status: 404, code: 'SOURCE_NOT_FOUND', message: 'An active owned Source is required.' };
+  return await validateSource(sourceId, ownerId) ? null : { status: 404, code: 'SOURCE_NOT_FOUND', message: 'An active shared Source is required.' };
 };
 
 function stableValue(value) {
@@ -341,22 +320,22 @@ async function validateBulkEventReferences(events, ownerId) {
   const sourceIds = [...new Set(events.map((event) => event.source_id).filter(Boolean))];
   if (sourceIds.length > 0) {
     const found = await db.select({ id: sources.id }).from(sources).where(and(
-      inArray(sources.id, sourceIds), eq(sources.createdBy, ownerId), isNull(sources.deletedAt),
+      inArray(sources.id, sourceIds), isNull(sources.deletedAt),
     ));
-    if (found.length !== sourceIds.length) return { code: 'SOURCE_NOT_FOUND', message: 'One or more active owned Sources were not found.' };
+    if (found.length !== sourceIds.length) return { code: 'SOURCE_NOT_FOUND', message: 'One or more active shared Sources were not found.' };
   }
   const experienceIds = [...new Set(events.map((event) => event.experience_id).filter(Boolean))];
   if (experienceIds.length > 0) {
     const found = await db.select({ id: memoryExperiences.id }).from(memoryExperiences).where(and(
-      inArray(memoryExperiences.id, experienceIds), eq(memoryExperiences.createdBy, ownerId), isNull(memoryExperiences.deletedAt),
+      inArray(memoryExperiences.id, experienceIds), isNull(memoryExperiences.deletedAt),
     ));
-    if (found.length !== experienceIds.length) return { code: 'EXPERIENCE_NOT_FOUND', message: 'One or more active owned Experiences were not found.' };
+    if (found.length !== experienceIds.length) return { code: 'EXPERIENCE_NOT_FOUND', message: 'One or more active workspace Experiences were not found.' };
   }
   return null;
 }
 
 memoryRoutes.post('/events/bulk', requireScopes('memory:write'), requireRoles('admin', 'editor'), requireSignedApiKeyRequest, async (c) => {
-  const input = eventBulkSchema.safeParse(await c.req.json().catch(() => null));
+  const input = memoryEventBulkSchema.safeParse(await c.req.json().catch(() => null));
   if (!input.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Event batch is invalid.', input.error.issues);
   const eventUids = input.data.events.map((event) => event.event_uid);
   if (new Set(eventUids).size !== eventUids.length) return errorResponse(c, 400, 'DUPLICATE_EVENT_UID', 'event_uid values must be unique within a batch.');
@@ -390,7 +369,7 @@ memoryRoutes.post('/events/bulk', requireScopes('memory:write'), requireRoles('a
 });
 
 memoryRoutes.post('/events/async', requireScopes('memory:write'), requireRoles('admin', 'editor'), requireSignedApiKeyRequest, async (c) => {
-  const input = eventAsyncSchema.safeParse(await c.req.json().catch(() => null));
+  const input = memoryEventAsyncSchema.safeParse(await c.req.json().catch(() => null));
   if (!input.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Async Event batch is invalid.', input.error.issues);
   const eventUids = input.data.events.map((event) => event.event_uid);
   if (new Set(eventUids).size !== eventUids.length) return errorResponse(c, 400, 'DUPLICATE_EVENT_UID', 'event_uid values must be unique within a batch.');
@@ -409,7 +388,7 @@ memoryRoutes.post('/events/async', requireScopes('memory:write'), requireRoles('
     eq(memoryEventIngestionBatches.createdBy, ownerId), eq(memoryEventIngestionBatches.batchUid, input.data.batch_uid),
   )).limit(1);
   if (completedBatch) return errorResponse(c, 409, 'BATCH_UID_CONFLICT', 'batch_uid already belongs to an ingested batch.');
-  const content = JSON.stringify({ events: input.data.events });
+  const content = JSON.stringify({ batch_uid: input.data.batch_uid, events: input.data.events });
   const byteSize = new TextEncoder().encode(content).byteLength;
   const maxBytes = Number(process.env.MAX_UPLOAD_SIZE_MB || 100) * 1024 * 1024;
   if (byteSize > maxBytes) return errorResponse(c, 413, 'EVENT_BATCH_TOO_LARGE', `Async Event batches are limited to ${maxBytes} bytes.`);
@@ -437,7 +416,7 @@ memoryRoutes.get('/event-jobs/:id', requireScopes('memory:read'), requireRoles('
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Event job ID must be a UUID.');
   const [job] = await db.select().from(memoryEventIngestionJobs).where(and(
-    eq(memoryEventIngestionJobs.id, id.data), eq(memoryEventIngestionJobs.createdBy, c.get('auth').sub),
+    eq(memoryEventIngestionJobs.id, id.data),
   )).limit(1);
   return job ? c.json({ data: serializeEventJob(job), meta: {}, error: null }) : errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Event job was not found.');
 });
@@ -446,25 +425,25 @@ memoryRoutes.post('/event-jobs/:id/cancel', requireUserAuth, requireScopes('memo
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Event job ID must be a UUID.');
   const [job] = await db.update(memoryEventIngestionJobs).set({ cancelRequested: true }).where(and(
-    eq(memoryEventIngestionJobs.id, id.data), eq(memoryEventIngestionJobs.createdBy, c.get('auth').sub),
+    eq(memoryEventIngestionJobs.id, id.data),
     inArray(memoryEventIngestionJobs.status, ['queued', 'processing']),
   )).returning();
   if (job) return c.json({ data: serializeEventJob(job), meta: {}, error: null });
   const [existing] = await db.select({ id: memoryEventIngestionJobs.id }).from(memoryEventIngestionJobs).where(and(
-    eq(memoryEventIngestionJobs.id, id.data), eq(memoryEventIngestionJobs.createdBy, c.get('auth').sub),
+    eq(memoryEventIngestionJobs.id, id.data),
   )).limit(1);
   return existing ? errorResponse(c, 409, 'JOB_NOT_CANCELLABLE', 'Only queued or processing Event jobs can be cancelled.') : errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Event job was not found.');
 });
 
 registerCrud({ path: 'experiences', singular: 'experience', table: memoryExperiences, schema: experienceSchema, mapper: mappings.experience, validate: sourceValidator('source_id') });
 registerCrud({
-  path: 'events', singular: 'event', table: memoryEvents, schema: eventSchema,
-  updateSchema: patchSchema(eventSchema.omit({ verification_state: true })), mapper: mappings.event,
+  path: 'events', singular: 'event', table: memoryEvents, schema: memoryEventSchema,
+  updateSchema: patchSchema(memoryEventSchema.omit({ verification_state: true })), mapper: mappings.event,
   validate: async (input, current, ownerId) => {
     const sourceError = await sourceValidator('source_id')(input, current, ownerId);
     if (sourceError) return sourceError;
     const experienceId = input.experience_id === undefined ? current?.experienceId : input.experience_id;
-    if (experienceId && !await validateNode('experience', experienceId, ownerId)) return { status: 404, code: 'EXPERIENCE_NOT_FOUND', message: 'An active owned Experience is required.' };
+    if (experienceId && !await validateNode('experience', experienceId, ownerId)) return { status: 404, code: 'EXPERIENCE_NOT_FOUND', message: 'An active workspace Experience is required.' };
     return null;
   },
 });
@@ -484,8 +463,8 @@ registerCrud({
     const validUntil = input.valid_until === undefined ? current?.validUntil : input.valid_until;
     if (minDelay != null && maxDelay != null && minDelay > maxDelay) return { status: 400, code: 'INVALID_DELAY_RANGE', message: 'max_delay_ms must be greater than or equal to min_delay_ms.' };
     if (validFrom && validUntil && validFrom > validUntil) return { status: 400, code: 'INVALID_VALIDITY_RANGE', message: 'valid_until must be after valid_from.' };
-    if (!await validateNode(sourceType, sourceId, ownerId)) return { status: 404, code: 'SOURCE_NODE_NOT_FOUND', message: 'The active owned source node was not found.' };
-    if (!await validateNode(targetType, targetId, ownerId)) return { status: 404, code: 'TARGET_NODE_NOT_FOUND', message: 'The active owned target node was not found.' };
+    if (!await validateNode(sourceType, sourceId, ownerId)) return { status: 404, code: 'SOURCE_NODE_NOT_FOUND', message: 'The active workspace source node was not found.' };
+    if (!await validateNode(targetType, targetId, ownerId)) return { status: 404, code: 'TARGET_NODE_NOT_FOUND', message: 'The active workspace target node was not found.' };
     return null;
   },
 });
@@ -504,10 +483,10 @@ async function validateEvidenceReference(type, id, ownerId) {
 memoryRoutes.get('/entities/:id/aliases', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Entity ID must be a UUID.');
-  const entity = await ownedActive(memoryEntities, id.data, c.get('auth').sub);
+  const entity = await activeResource(memoryEntities, id.data);
   if (!entity) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Entity was not found.');
   const items = await db.select().from(memoryEntityAliases).where(and(
-    eq(memoryEntityAliases.entityId, entity.id), eq(memoryEntityAliases.createdBy, c.get('auth').sub), isNull(memoryEntityAliases.deletedAt),
+    eq(memoryEntityAliases.entityId, entity.id), isNull(memoryEntityAliases.deletedAt),
   )).orderBy(desc(memoryEntityAliases.createdAt));
   return c.json({ data: items.map(serializeAlias), meta: {}, error: null });
 });
@@ -517,7 +496,7 @@ memoryRoutes.post('/entities/:id/aliases', requireScopes('memory:write'), requir
   const input = aliasSchema.safeParse(await c.req.json().catch(() => null));
   if (!id.success || !input.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Entity alias is invalid.', input.error?.issues || []);
   const ownerId = c.get('auth').sub;
-  const entity = await ownedActive(memoryEntities, id.data, ownerId);
+  const entity = await activeResource(memoryEntities, id.data);
   if (!entity) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Entity was not found.');
   try {
     const [created] = await db.insert(memoryEntityAliases).values({
@@ -538,7 +517,7 @@ memoryRoutes.delete('/entities/:entityId/aliases/:aliasId', requireScopes('memor
   if (!entityId.success || !aliasId.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Entity and alias IDs must be UUIDs.');
   const [deleted] = await db.update(memoryEntityAliases).set({ deletedAt: new Date(), updatedAt: new Date() }).where(and(
     eq(memoryEntityAliases.id, aliasId.data), eq(memoryEntityAliases.entityId, entityId.data),
-    eq(memoryEntityAliases.createdBy, c.get('auth').sub), isNull(memoryEntityAliases.deletedAt),
+    isNull(memoryEntityAliases.deletedAt),
   )).returning();
   if (!deleted) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Entity alias was not found.');
   return c.json({ data: serializeAlias(deleted), meta: {}, error: null });
@@ -547,10 +526,10 @@ memoryRoutes.delete('/entities/:entityId/aliases/:aliasId', requireScopes('memor
 memoryRoutes.get('/relations/:id/evidence', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Relation ID must be a UUID.');
-  const relation = await ownedActive(memoryRelations, id.data, c.get('auth').sub);
+  const relation = await activeResource(memoryRelations, id.data);
   if (!relation) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Relation was not found.');
   const items = await db.select().from(memoryRelationEvidence).where(and(
-    eq(memoryRelationEvidence.relationId, relation.id), eq(memoryRelationEvidence.createdBy, c.get('auth').sub),
+    eq(memoryRelationEvidence.relationId, relation.id),
   )).orderBy(desc(memoryRelationEvidence.createdAt));
   return c.json({ data: items.map(serializeEvidence), meta: {}, error: null });
 });
@@ -560,8 +539,13 @@ memoryRoutes.post('/relations/:id/evidence', requireScopes('memory:write'), requ
   const input = evidenceSchema.safeParse(await c.req.json().catch(() => null));
   if (!id.success || !input.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Relation evidence is invalid.', input.error?.issues || []);
   const ownerId = c.get('auth').sub;
-  const relation = await ownedActive(memoryRelations, id.data, ownerId);
+  const relation = await activeResource(memoryRelations, id.data);
   if (!relation) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Relation was not found.');
+  if (relation.revision !== input.data.expected_revision) {
+    return errorResponse(c, 409, 'REVISION_CONFLICT', 'The Relation changed concurrently.', [{
+      expected_revision: input.data.expected_revision, current_revision: relation.revision,
+    }]);
+  }
   if (!await validateEvidenceReference(input.data.reference_type, input.data.reference_id, ownerId)) {
     return errorResponse(c, 404, 'EVIDENCE_REFERENCE_NOT_FOUND', 'The evidence reference is invalid or unavailable.');
   }
@@ -576,13 +560,24 @@ memoryRoutes.post('/relations/:id/evidence', requireScopes('memory:write'), requ
       const countColumn = input.data.supports ? memoryRelations.evidenceCount : memoryRelations.counterexampleCount;
       const [updatedRelation] = await tx.update(memoryRelations).set({
         [input.data.supports ? 'evidenceCount' : 'counterexampleCount']: sql`${countColumn} + 1`,
-        updatedAt: new Date(),
-      }).where(and(eq(memoryRelations.id, relation.id), isNull(memoryRelations.deletedAt))).returning();
+        verificationState: ['verified', 'rejected'].includes(relation.verificationState) ? 'candidate' : relation.verificationState,
+        revision: sql`${memoryRelations.revision} + 1`, updatedAt: new Date(),
+      }).where(and(
+        eq(memoryRelations.id, relation.id), eq(memoryRelations.revision, input.data.expected_revision),
+        isNull(memoryRelations.deletedAt),
+      )).returning();
+      if (!updatedRelation) throw Object.assign(new Error('Relation revision conflict.'), { code: 'REVISION_CONFLICT' });
       return { created, updatedRelation };
     });
     return c.json({ data: { evidence: serializeEvidence(result.created), relation: serializers.relation(result.updatedRelation) }, meta: {}, error: null }, 201);
   } catch (error) {
     if (error?.code === '23505') return errorResponse(c, 409, 'EVIDENCE_UID_CONFLICT', 'This evidence_uid already exists for the relation.');
+    if (error?.code === 'REVISION_CONFLICT') {
+      const latest = await activeResource(memoryRelations, relation.id);
+      return errorResponse(c, 409, 'REVISION_CONFLICT', 'The Relation changed concurrently.', [{
+        expected_revision: input.data.expected_revision, current_revision: latest?.revision ?? null,
+      }]);
+    }
     throw error;
   }
 });
@@ -602,7 +597,7 @@ const allowedVerificationTransitions = {
 memoryRoutes.get('/verification/:type/:id', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const type = verificationTargetType.safeParse(c.req.param('type')); const id = uuidSchema.safeParse(c.req.param('id'));
   if (!type.success || !id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Verification target is invalid.');
-  const target = await ownedActive(verificationTargets[type.data], id.data, c.get('auth').sub);
+  const target = await activeResource(verificationTargets[type.data], id.data);
   if (!target) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Verification target was not found.');
   const items = await db.select().from(memoryVerificationDecisions).where(and(
     eq(memoryVerificationDecisions.targetType, type.data), eq(memoryVerificationDecisions.targetId, target.id),
@@ -619,23 +614,41 @@ memoryRoutes.post('/verification/:type/:id', requireScopes('memory:verify'), req
   }
   const ownerId = c.get('auth').sub;
   const table = verificationTargets[type.data];
-  const target = await ownedActive(table, id.data, ownerId);
+  const target = await activeResource(table, id.data);
   if (!target) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Verification target was not found.');
+  if (target.revision !== input.data.expected_revision) {
+    return errorResponse(c, 409, 'REVISION_CONFLICT', 'The verification target changed concurrently.', [{
+      expected_revision: input.data.expected_revision, current_revision: target.revision,
+    }]);
+  }
   if (target.verificationState !== input.data.expected_state) return errorResponse(c, 409, 'VERIFICATION_STATE_CONFLICT', 'The verification state changed concurrently.');
   const result = await db.transaction(async (tx) => {
-    const [updated] = await tx.update(table).set({ verificationState: input.data.state, updatedAt: new Date() }).where(and(
-      eq(table.id, target.id), eq(table.createdBy, ownerId), eq(table.verificationState, input.data.expected_state), isNull(table.deletedAt),
+    const [updated] = await tx.update(table).set({
+      verificationState: input.data.state, revision: sql`${table.revision} + 1`, updatedAt: new Date(),
+    }).where(and(
+      eq(table.id, target.id), eq(table.revision, input.data.expected_revision),
+      eq(table.verificationState, input.data.expected_state), isNull(table.deletedAt),
     )).returning();
     if (!updated) return null;
+    const snapshot = type.data === 'entity_alias' ? serializeAlias(updated) : serializers[type.data](updated);
     const [decision] = await tx.insert(memoryVerificationDecisions).values({
       targetType: type.data, targetId: target.id, fromState: input.data.expected_state,
-      toState: input.data.state, notes: input.data.notes ?? null,
+      toState: input.data.state, targetRevision: updated.revision, targetSnapshot: snapshot,
+      notes: input.data.notes ?? null,
       metadata: input.data.metadata, decidedBy: ownerId,
     }).returning();
     return { updated, decision };
   });
-  if (!result) return errorResponse(c, 409, 'VERIFICATION_STATE_CONFLICT', 'The verification state changed concurrently.');
-  return c.json({ data: { target_id: result.updated.id, verification_state: result.updated.verificationState, decision: serializeDecision(result.decision) }, meta: {}, error: null });
+  if (!result) {
+    const latest = await activeResource(table, target.id);
+    if (latest?.revision !== input.data.expected_revision) {
+      return errorResponse(c, 409, 'REVISION_CONFLICT', 'The verification target changed concurrently.', [{
+        expected_revision: input.data.expected_revision, current_revision: latest?.revision ?? null,
+      }]);
+    }
+    return errorResponse(c, 409, 'VERIFICATION_STATE_CONFLICT', 'The verification state changed concurrently.');
+  }
+  return c.json({ data: { target_id: result.updated.id, revision: result.updated.revision, verification_state: result.updated.verificationState, decision: serializeDecision(result.decision) }, meta: {}, error: null });
 });
 
 memoryRoutes.post('/traverse', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
@@ -665,7 +678,7 @@ memoryRoutes.post('/traverse', requireScopes('memory:read'), requireRoles('admin
       directionConditions.push(...frontier.map((node) => and(eq(memoryRelations.targetType, node.type), eq(memoryRelations.targetId, node.id))));
     }
     const conditions = [
-      eq(memoryRelations.createdBy, ownerId), isNull(memoryRelations.deletedAt),
+      isNull(memoryRelations.deletedAt),
       gte(memoryRelations.confidence, input.data.min_confidence),
       inArray(memoryRelations.verificationState, input.data.verification_states),
       or(isNull(memoryRelations.validFrom), lte(memoryRelations.validFrom, now)),
@@ -716,7 +729,7 @@ memoryRoutes.get('/nodes/:type/:id/neighbors', requireScopes('memory:read'), req
   const ownerId = c.get('auth').sub;
   if (!await validateNode(type.data, id.data, ownerId)) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Node was not found.');
   const items = await db.select().from(memoryRelations).where(and(
-    eq(memoryRelations.createdBy, ownerId), isNull(memoryRelations.deletedAt),
+    isNull(memoryRelations.deletedAt),
     or(
       and(eq(memoryRelations.sourceType, type.data), eq(memoryRelations.sourceId, id.data)),
       and(eq(memoryRelations.targetType, type.data), eq(memoryRelations.targetId, id.data)),

@@ -1,4 +1,5 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
+import { normalizeImportedRecord, parseImportContent } from '@sara-knowledge/domain-contracts/record-import';
 import { db } from '../db/client.js';
 import {
   exportJobs,
@@ -19,100 +20,12 @@ export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 export const MAX_IMPORT_ROWS = 1000;
 export const MAX_EXPORT_ROWS = 1000;
 
-const recordTypes = new Set([
-  'plain_text', 'instruction', 'qa', 'chat', 'sharegpt', 'chatml',
-  'dpo', 'rlhf', 'classification', 'image_caption', 'multimodal',
-  'event_sequence', 'custom',
-]);
-const recordStatuses = new Set(['draft', 'pending_review', 'approved', 'rejected', 'archived']);
+export { normalizeImportedRecord, parseImportContent } from '@sara-knowledge/domain-contracts/record-import';
 
 export async function sha256(value) {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
-}
-
-function parseCsv(content) {
-  const rows = [];
-  let row = [];
-  let field = '';
-  let quoted = false;
-  for (let index = 0; index < content.length; index += 1) {
-    const character = content[index];
-    if (quoted) {
-      if (character === '"' && content[index + 1] === '"') {
-        field += '"';
-        index += 1;
-      } else if (character === '"') quoted = false;
-      else field += character;
-    } else if (character === '"') quoted = true;
-    else if (character === ',') {
-      row.push(field);
-      field = '';
-    } else if (character === '\n') {
-      row.push(field.replace(/\r$/, ''));
-      rows.push(row);
-      row = [];
-      field = '';
-    } else field += character;
-  }
-  if (quoted) throw new Error('CSV contains an unterminated quoted field.');
-  if (field || row.length) {
-    row.push(field.replace(/\r$/, ''));
-    rows.push(row);
-  }
-  const nonEmpty = rows.filter((values) => values.some((value) => value !== ''));
-  if (nonEmpty.length < 2) return [];
-  const headers = nonEmpty[0].map((header) => header.trim());
-  if (headers.some((header) => !header)) throw new Error('CSV headers must not be empty.');
-  return nonEmpty.slice(1).map((values) => Object.fromEntries(
-    headers.map((header, index) => [header, values[index] ?? '']),
-  ));
-}
-
-export function parseImportContent(format, content) {
-  let rows;
-  if (format === 'jsonl') {
-    rows = content.split(/\r?\n/).filter((line) => line.trim()).map((line, index) => {
-      try { return JSON.parse(line); } catch { throw new Error(`JSONL line ${index + 1} is invalid JSON.`); }
-    });
-  } else if (format === 'json') {
-    const parsed = JSON.parse(content);
-    rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.records) ? parsed.records : [parsed];
-  } else rows = parseCsv(content);
-  if (rows.length > MAX_IMPORT_ROWS) throw new Error(`Import exceeds the ${MAX_IMPORT_ROWS} row limit.`);
-  return rows;
-}
-
-function maybeJson(value) {
-  if (typeof value !== 'string') return value;
-  const trimmed = value.trim();
-  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return value;
-  try { return JSON.parse(trimmed); } catch { return value; }
-}
-
-export function normalizeImportedRecord(row, defaults = {}) {
-  if (!row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).length === 0) {
-    throw new Error('Row must be a non-empty object.');
-  }
-  let recordType = row.record_type || defaults.record_type;
-  if (!recordType) recordType = row.instruction !== undefined ? 'instruction' : 'plain_text';
-  if (!recordTypes.has(recordType)) throw new Error(`Unsupported record_type: ${recordType}`);
-  const status = row.status || defaults.status || 'draft';
-  if (!recordStatuses.has(status)) throw new Error(`Unsupported status: ${status}`);
-  const content = row.content === undefined ? row : maybeJson(row.content);
-  return {
-    recordType,
-    title: row.title || null,
-    status,
-    languageCode: row.language_code || defaults.language_code || null,
-    qualityScore: row.quality_score === '' || row.quality_score == null ? null : Number(row.quality_score),
-    confidence: row.confidence === '' || row.confidence == null ? null : Number(row.confidence),
-    content,
-    plainText: row.plain_text || row.text || null,
-    schemaVersion: row.schema_version || '1.0',
-    metadata: row.metadata && typeof maybeJson(row.metadata) === 'object' ? maybeJson(row.metadata) : {},
-  };
 }
 
 export async function createImportJob(c, input) {
@@ -177,7 +90,7 @@ export async function createImportJob(c, input) {
 
   let rows;
   try {
-    rows = parseImportContent(input.format, input.content);
+    rows = parseImportContent(input.format, input.content, { maxRows: MAX_IMPORT_ROWS });
   } catch (error) {
     const [failed] = await db.update(importJobs).set({ status: 'failed', completedAt: new Date() })
       .where(eq(importJobs.id, job.id)).returning();
@@ -189,10 +102,6 @@ export async function createImportJob(c, input) {
   for (let index = 0; index < rows.length; index += 1) {
     try {
       const normalized = normalizeImportedRecord(rows[index], input.defaults);
-      if ((normalized.qualityScore != null && (!Number.isFinite(normalized.qualityScore) || normalized.qualityScore < 0 || normalized.qualityScore > 1))
-        || (normalized.confidence != null && (!Number.isFinite(normalized.confidence) || normalized.confidence < 0 || normalized.confidence > 1))) {
-        throw new Error('quality_score and confidence must be between 0 and 1.');
-      }
       await db.transaction(async (tx) => {
         const recordId = crypto.randomUUID();
         const versionId = crypto.randomUUID();

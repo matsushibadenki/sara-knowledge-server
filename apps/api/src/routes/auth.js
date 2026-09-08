@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { db } from '../db/client.js';
 import { apiKeys, refreshTokens, users } from '../db/schema/index.js';
 import { verifyPassword } from '../auth/passwords.js';
-import { requireRoles, requireUserAuth } from '../auth/middleware.js';
+import { findActiveWorkspaceMembership, requireRoles, requireUserAuth } from '../auth/middleware.js';
 import {
   clearLoginAttempts,
   consumeLoginAttempt,
@@ -65,6 +65,27 @@ function serializeUser(user) {
     locale: user.locale,
     status: user.status,
   };
+}
+
+function serializeWorkspace(membership) {
+  return {
+    id: membership.workspaceId,
+    slug: membership.workspaceSlug,
+    name: membership.workspaceName,
+    role: membership.role,
+  };
+}
+
+function workspaceAccessResponse(c) {
+  return c.json({
+    data: null,
+    meta: {},
+    error: {
+      code: 'WORKSPACE_ACCESS_REQUIRED',
+      message: 'An active workspace membership is required.',
+      details: [],
+    },
+  }, 403);
 }
 
 const authRoutes = new Hono();
@@ -145,6 +166,9 @@ authRoutes.post('/login', async (c) => {
     }, 401);
   }
 
+  const workspace = await findActiveWorkspaceMembership(user.id);
+  if (!workspace) return workspaceAccessResponse(c);
+
   try {
     await clearLoginAttempts(result.data.email);
   } catch (error) {
@@ -182,7 +206,8 @@ authRoutes.post('/login', async (c) => {
       expires_in: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
       refresh_token: refreshToken,
       refresh_expires_at: refreshExpiresAt.toISOString(),
-      user: serializeUser(user),
+      user: { ...serializeUser(user), role: workspace.role },
+      workspace: serializeWorkspace(workspace),
     },
     meta: {},
     error: null,
@@ -221,6 +246,8 @@ authRoutes.post('/refresh', async (c) => {
       .where(and(eq(users.id, storedToken.userId), eq(users.status, 'active'), isNull(users.deletedAt)))
       .limit(1);
     if (!user) return null;
+    const workspace = await findActiveWorkspaceMembership(user.id, tx);
+    if (!workspace) return null;
 
     const now = new Date();
     await tx.update(refreshTokens)
@@ -233,7 +260,7 @@ authRoutes.post('/refresh', async (c) => {
       expiresAt: refreshExpiresAt,
     });
 
-    return { user };
+    return { user, workspace };
   });
 
   if (!rotation) {
@@ -251,7 +278,8 @@ authRoutes.post('/refresh', async (c) => {
       expires_in: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
       refresh_token: nextRefreshToken,
       refresh_expires_at: refreshExpiresAt.toISOString(),
-      user: serializeUser(rotation.user),
+      user: { ...serializeUser(rotation.user), role: rotation.workspace.role },
+      workspace: serializeWorkspace(rotation.workspace),
     },
     meta: {},
     error: null,
@@ -277,7 +305,16 @@ authRoutes.post('/logout', async (c) => {
 });
 
 authRoutes.get('/me', requireUserAuth, async (c) => {
-  return c.json({ data: serializeUser(c.get('authUser')), meta: {}, error: null });
+  const workspace = c.get('workspace');
+  return c.json({
+    data: {
+      ...serializeUser(c.get('authUser')),
+      role: workspace.role,
+      workspace: serializeWorkspace(workspace),
+    },
+    meta: {},
+    error: null,
+  });
 });
 
 authRoutes.get('/api-keys', requireUserAuth, requireRoles('admin'), async (c) => {

@@ -24,6 +24,11 @@
 
 ## 現在の主要ドキュメント
 
+- `access-boundaries.md`: singleton workspace membership、作者情報、role／scopeのアクセス契約
+- `access-boundary-progress-2026-09-08.md`: Record参照修正とworkspace移行、backup／復元、複数ユーザーテストの実装記録
+- `approval-integrity-progress-2026-09-08.md`: Record承認経路、更新時draft化、同期／非同期Import制約の実装記録
+- `memory-revision-progress-2026-09-08.md`: Memory revision、Verification snapshot、同時更新、backup復元の実装記録
+- `shared-contracts-ci-progress-2026-09-08.md`: API／Worker共有契約、空DB migration、実Worker CIの実装記録
 - `semantic-condensation-and-concept-discovery.md`: 多様な表現からの概念抽出、由来別の証拠管理、条件・反例・再探索のSC-0〜SC-2実験
 
 - `database-direction-review-2026-09-05.md`: 新しい知識DBとしての成立条件、実装上の不足、revision／訂正／配置／移行方針

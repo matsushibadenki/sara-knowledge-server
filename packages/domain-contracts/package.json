@@ -1,0 +1,13 @@
+{
+  "name": "@sara-knowledge/domain-contracts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./memory-events": "./src/memory-events.js",
+    "./record-import": "./src/record-import.js"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  }
+}

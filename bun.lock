@@ -18,6 +18,7 @@
       "name": "@sara-knowledge/api",
       "version": "0.1.0",
       "dependencies": {
+        "@sara-knowledge/domain-contracts": "workspace:*",
         "drizzle-orm": "^0.38.0",
         "hono": "^4.7.0",
         "jose": "^6.0.0",
@@ -32,7 +33,15 @@
       "name": "@sara-knowledge/worker",
       "version": "0.1.0",
       "dependencies": {
+        "@sara-knowledge/domain-contracts": "workspace:*",
         "postgres": "^3.4.5",
+      },
+    },
+    "packages/domain-contracts": {
+      "name": "@sara-knowledge/domain-contracts",
+      "version": "0.1.0",
+      "dependencies": {
+        "zod": "^3.24.0",
       },
     },
   },
@@ -164,6 +173,8 @@
     "@sara-knowledge/admin": ["@sara-knowledge/admin@workspace:apps/admin"],
 
     "@sara-knowledge/api": ["@sara-knowledge/api@workspace:apps/api"],
+
+    "@sara-knowledge/domain-contracts": ["@sara-knowledge/domain-contracts@workspace:packages/domain-contracts"],
 
     "@sara-knowledge/worker": ["@sara-knowledge/worker@workspace:apps/worker"],
 

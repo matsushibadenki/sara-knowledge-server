@@ -32,11 +32,11 @@ POST / PATCH / DELETE      records:write
 restore                    records:write
 ```
 
-JWTユーザーの場合、閲覧は`admin / editor / reviewer / viewer`、変更は`admin / editor`に限定する。APIキーの場合はユーザーロールではなくscopeで認可する。
+閲覧は`admin / editor / reviewer / viewer`、変更は`admin / editor`に限定する。JWTとAPIキーの両方でworkspace membership roleを検査し、APIキーでは必要scopeも併せて検査する。
 
 ## 作成
 
-作成時に、親レコードとVersion 1を同一トランザクションで作成する。
+作成時に、親レコードとVersion 1を同一トランザクションで`draft`として作成する。`approved`、`pending_review`、`rejected`、`archived`を一般POSTで直接指定すると`422 REVIEW_STATUS_REQUIRED`を返す。
 
 ```json
 {
@@ -72,7 +72,7 @@ Sourceの作成と削除方針は[`sources.md`](sources.md)を参照する。
 }
 ```
 
-最新Versionと一致しない場合は`409 VERSION_CONFLICT`を返す。既存Versionは上書きせず、新しいVersionを追加する。
+最新Versionと一致しない場合は`409 VERSION_CONFLICT`を返す。既存Versionは上書きせず、新しいVersionを追加する。PATCHは必ず新Versionを`draft`として作り、承認済みの旧VersionとReview履歴を変更しない。workflow状態はレビュー専用APIだけが確定する。
 
 同時更新時は親Recordを行ロックする。DBでも版番号と現在版の一意性を制約し、競合した2要求が同じ次版を作らないようにする。
 

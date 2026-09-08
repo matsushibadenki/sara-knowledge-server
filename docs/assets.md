@@ -70,7 +70,7 @@ assets:write
 
 ## English
 
-Binary content lives in object storage; PostgreSQL is authoritative for metadata, lifecycle state, and provenance. Upload reservations produce server-generated object keys and five-minute presigned PUT URLs. Completion verifies existence, byte size, and SHA-256 before marking an Asset ready. Bindings are restricted to owned active Sources, Records, and Events.
+Binary content lives in object storage; PostgreSQL is authoritative for metadata, lifecycle state, and provenance. Upload reservations produce workspace-scoped object keys and five-minute presigned PUT URLs. Completion verifies existence, byte size, and SHA-256 before marking an Asset ready. Bindings are restricted to active Sources, Records, and Events in the authenticated singleton workspace.
 
 Duplicate hashes are reported rather than rejected because identical bytes can have different provenance or licensing. Production NFS paths must remain private behind an App VPS upload／download gateway or an S3-compatible gateway.
 
@@ -82,8 +82,7 @@ Duplicate hashes are reported rather than rejected because identical bytes can h
 
 ## Roadmap
 
-- [Done] Presigned upload／download, completion verification, ownership, provenance binding
+- [Done] Presigned upload／download, completion verification, workspace membership, provenance binding
 - [Done] Duplicate detection without forced deduplication
 - [Next] Asset processing jobs, media metadata extraction, and derived-Asset provenance
 - [Later] Malware scanning, streaming hash, multipart upload, retention cleanup
-

@@ -51,6 +51,40 @@ export const users = authSchema.table('users', {
   ),
 }));
 
+export const workspaces = authSchema.table('workspaces', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  scopeKey: text('scope_key').notNull().default('server').unique(),
+  slug: text('slug').notNull().unique(),
+  name: text('name').notNull(),
+  status: text('status').notNull().default('active'),
+  createdBy: uuid('created_by').references(() => users.id),
+  ...auditColumns,
+}, (table) => ({
+  scopeKeyCheck: check('workspaces_scope_key_check', sql`${table.scopeKey} = 'server'`),
+  statusCheck: check('workspaces_status_check', sql`${table.status} IN ('active', 'disabled')`),
+  createdByIndex: index('workspaces_created_by_idx').on(table.createdBy),
+}));
+
+export const workspaceMemberships = authSchema.table('workspace_memberships', {
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text('role').notNull().default('viewer'),
+  status: text('status').notNull().default('active'),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  primaryKey: primaryKey({ columns: [table.workspaceId, table.userId] }),
+  userStatusIndex: index('workspace_memberships_user_status_idx').on(table.userId, table.status),
+  roleCheck: check(
+    'workspace_memberships_role_check',
+    sql`${table.role} IN ('admin', 'editor', 'reviewer', 'viewer', 'service')`,
+  ),
+  statusCheck: check(
+    'workspace_memberships_status_check',
+    sql`${table.status} IN ('active', 'suspended')`,
+  ),
+}));
+
 export const refreshTokens = authSchema.table('refresh_tokens', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id),
@@ -532,6 +566,7 @@ export const memoryExperiences = memorySchema.table('experiences', {
   curriculumLevel: text('curriculum_level').notNull().default('raw'),
   splitName: text('split_name').notNull().default('unsplit'),
   metadata: jsonb('metadata').notNull().default({}),
+  revision: integer('revision').notNull().default(1),
   createdBy: uuid('created_by').notNull().references(() => users.id),
   ...auditColumns,
 }, (table) => ({
@@ -541,6 +576,7 @@ export const memoryExperiences = memorySchema.table('experiences', {
   sourceIdIndex: index('memory_experiences_source_id_idx').on(table.sourceId),
   qualityCheck: check('memory_experiences_quality_check', sql`${table.qualityScore} BETWEEN 0 AND 1`),
   splitCheck: check('memory_experiences_split_check', sql`${table.splitName} IN ('unsplit', 'train', 'validation', 'test', 'holdout', 'custom')`),
+  revisionCheck: check('memory_experiences_revision_check', sql`${table.revision} > 0`),
 }));
 
 export const memoryEventIngestionBatches = memorySchema.table('event_ingestion_batches', {
@@ -611,6 +647,7 @@ export const memoryEvents = memorySchema.table('events', {
   novelty: doublePrecision('novelty').notNull().default(0),
   priorityScore: doublePrecision('priority_score').notNull().default(0),
   metadata: jsonb('metadata').notNull().default({}),
+  revision: integer('revision').notNull().default(1),
   createdBy: uuid('created_by').notNull().references(() => users.id),
   ...auditColumns,
 }, (table) => ({
@@ -629,6 +666,7 @@ export const memoryEvents = memorySchema.table('events', {
   noveltyCheck: check('memory_events_novelty_check', sql`${table.novelty} BETWEEN 0 AND 1`),
   verificationCheck: check('memory_events_verification_check', sql`${table.verificationState} IN ('unverified', 'candidate', 'verified', 'rejected')`),
   batchPositionCheck: check('memory_events_batch_position_check', sql`(${table.ingestionBatchId} IS NULL AND ${table.batchPosition} IS NULL) OR (${table.ingestionBatchId} IS NOT NULL AND ${table.batchPosition} > 0)`),
+  revisionCheck: check('memory_events_revision_check', sql`${table.revision} > 0`),
 }));
 
 export const memoryEntities = memorySchema.table('entities', {
@@ -642,6 +680,7 @@ export const memoryEntities = memorySchema.table('entities', {
   verificationState: text('verification_state').notNull().default('unverified'),
   proposalSource: text('proposal_source').notNull(),
   sourceId: uuid('source_id').references(() => sources.id),
+  revision: integer('revision').notNull().default(1),
   createdBy: uuid('created_by').notNull().references(() => users.id),
   ...auditColumns,
 }, (table) => ({
@@ -652,6 +691,7 @@ export const memoryEntities = memorySchema.table('entities', {
   sourceIdIndex: index('memory_entities_source_id_idx').on(table.sourceId),
   confidenceCheck: check('memory_entities_confidence_check', sql`${table.confidence} BETWEEN 0 AND 1`),
   verificationCheck: check('memory_entities_verification_check', sql`${table.verificationState} IN ('unverified', 'candidate', 'verified', 'rejected')`),
+  revisionCheck: check('memory_entities_revision_check', sql`${table.revision} > 0`),
 }));
 
 export const memoryEntityAliases = memorySchema.table('entity_aliases', {
@@ -664,6 +704,7 @@ export const memoryEntityAliases = memorySchema.table('entity_aliases', {
   confidence: doublePrecision('confidence').notNull().default(0.5),
   proposalSource: text('proposal_source').notNull(),
   verificationState: text('verification_state').notNull().default('unverified'),
+  revision: integer('revision').notNull().default(1),
   createdBy: uuid('created_by').notNull().references(() => users.id),
   ...auditColumns,
 }, (table) => ({
@@ -675,6 +716,7 @@ export const memoryEntityAliases = memorySchema.table('entity_aliases', {
   createdByIndex: index('memory_entity_aliases_created_by_idx').on(table.createdBy),
   confidenceCheck: check('memory_entity_aliases_confidence_check', sql`${table.confidence} BETWEEN 0 AND 1`),
   verificationCheck: check('memory_entity_aliases_verification_check', sql`${table.verificationState} IN ('unverified', 'candidate', 'verified', 'rejected')`),
+  revisionCheck: check('memory_entity_aliases_revision_check', sql`${table.revision} > 0`),
 }));
 
 export const memoryConcepts = memorySchema.table('concepts', {
@@ -691,6 +733,7 @@ export const memoryConcepts = memorySchema.table('concepts', {
   eventPattern: jsonb('event_pattern'),
   payload: jsonb('payload').notNull().default({}),
   sourceId: uuid('source_id').references(() => sources.id),
+  revision: integer('revision').notNull().default(1),
   createdBy: uuid('created_by').notNull().references(() => users.id),
   ...auditColumns,
 }, (table) => ({
@@ -701,6 +744,7 @@ export const memoryConcepts = memorySchema.table('concepts', {
   sourceIdIndex: index('memory_concepts_source_id_idx').on(table.sourceId),
   countsCheck: check('memory_concepts_counts_check', sql`${table.evidenceCount} >= 0 AND ${table.contradictionCount} >= 0`),
   verificationCheck: check('memory_concepts_verification_check', sql`${table.verificationState} IN ('unverified', 'candidate', 'verified', 'rejected')`),
+  revisionCheck: check('memory_concepts_revision_check', sql`${table.revision} > 0`),
 }));
 
 export const memoryRelations = memorySchema.table('relations', {
@@ -724,6 +768,7 @@ export const memoryRelations = memorySchema.table('relations', {
   proposalSource: text('proposal_source').notNull(),
   context: jsonb('context').notNull().default({}),
   payload: jsonb('payload').notNull().default({}),
+  revision: integer('revision').notNull().default(1),
   createdBy: uuid('created_by').notNull().references(() => users.id),
   ...auditColumns,
 }, (table) => ({
@@ -742,6 +787,7 @@ export const memoryRelations = memorySchema.table('relations', {
   delayCheck: check('memory_relations_delay_check', sql`(${table.minDelayMs} IS NULL OR ${table.minDelayMs} >= 0) AND (${table.maxDelayMs} IS NULL OR ${table.maxDelayMs} >= 0) AND (${table.minDelayMs} IS NULL OR ${table.maxDelayMs} IS NULL OR ${table.minDelayMs} <= ${table.maxDelayMs})`),
   validityCheck: check('memory_relations_validity_check', sql`${table.validFrom} IS NULL OR ${table.validUntil} IS NULL OR ${table.validFrom} <= ${table.validUntil}`),
   verificationCheck: check('memory_relations_verification_check', sql`${table.verificationState} IN ('unverified', 'candidate', 'verified', 'rejected')`),
+  revisionCheck: check('memory_relations_revision_check', sql`${table.revision} > 0`),
 }));
 
 export const memoryRelationEvidence = memorySchema.table('relation_evidence', {
@@ -772,6 +818,8 @@ export const memoryVerificationDecisions = memorySchema.table('verification_deci
   targetId: uuid('target_id').notNull(),
   fromState: text('from_state').notNull(),
   toState: text('to_state').notNull(),
+  targetRevision: integer('target_revision').notNull().default(1),
+  targetSnapshot: jsonb('target_snapshot').notNull().default({}),
   notes: text('notes'),
   metadata: jsonb('metadata').notNull().default({}),
   decidedBy: uuid('decided_by').notNull().references(() => users.id),
@@ -781,6 +829,7 @@ export const memoryVerificationDecisions = memorySchema.table('verification_deci
   decidedByIndex: index('memory_verification_decided_by_idx').on(table.decidedBy),
   targetTypeCheck: check('memory_verification_target_type_check', sql`${table.targetType} IN ('event', 'entity', 'entity_alias', 'concept', 'relation')`),
   stateCheck: check('memory_verification_state_check', sql`${table.fromState} IN ('unverified', 'candidate', 'verified', 'rejected') AND ${table.toState} IN ('candidate', 'verified', 'rejected') AND ${table.fromState} <> ${table.toState}`),
+  targetRevisionCheck: check('memory_verification_target_revision_check', sql`${table.targetRevision} > 0`),
 }));
 
 export const auditLogs = systemSchema.table('audit_logs', {

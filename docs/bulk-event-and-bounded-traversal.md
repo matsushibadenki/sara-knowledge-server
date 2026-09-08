@@ -23,7 +23,7 @@
 
 ## English
 
-The bulk endpoint atomically ingests 1–500 ordered events. A creator-scoped batch UID and canonical SHA-256 make exact retries safe; changed payloads or event UID collisions return `409` without partial writes. Bounded BFS enforces ownership, temporal validity, verification, confidence, relation, direction, and hard resource limits. Production workers use HTTPS or a job queue and never connect directly to Managed PostgreSQL.
+The bulk endpoint atomically ingests 1–500 ordered events. A creator-scoped batch UID and canonical SHA-256 make exact retries safe; changed payloads or event UID collisions return `409` without partial writes. Bounded BFS enforces active singleton-workspace membership, temporal validity, verification, confidence, relation, direction, and hard resource limits. Production workers use HTTPS or a job queue and never connect directly to Managed PostgreSQL.
 
 ## 简体中文
 

@@ -12,8 +12,8 @@
 - Refresh TokenはDBにハッシュのみ保存し、使用時にローテーションする
 - Refresh Token更新時は対象行をロックし、同じTokenの同時再利用を拒否する
 - APIキー本体は作成時に一度だけ返し、DBにはSHA-256ハッシュのみ保存する
-- Bearer認証時は署名だけでなく、ユーザーが現在も有効かDBで確認する
-- APIキー認証時は失効日時、有効期限、所有ユーザーの状態を確認し、利用成功時に`last_used_at`を更新する
+- Bearer認証時は署名だけでなく、ユーザーとsingleton workspace membershipが現在も有効かDBで確認する
+- APIキー認証時は失効日時、有効期限、所有ユーザーとworkspace membershipの状態を確認し、利用成功時に`last_used_at`を更新する
 
 ## API
 
@@ -54,7 +54,7 @@ DELETE /api/v1/auth/api-keys/:id
 Authorization: Bearer <access_token>
 ```
 
-Refresh Tokenはログインまたは更新レスポンスの`refresh_token`として返される。更新時は古いTokenを失効させ、新しいRefresh Tokenを発行する。
+Refresh Tokenはログインまたは更新レスポンスの`refresh_token`として返される。更新時は古いTokenを失効させ、新しいRefresh Tokenを発行する。ログイン、更新、`/auth/me`はworkspace ID、slug、name、membership roleも返す。
 
 ## APIキー認証
 
@@ -75,7 +75,7 @@ sources:read   Sourceの一覧・詳細参照
 sources:write  Sourceの作成・更新・論理削除・復元
 ```
 
-scopeが不足する場合は`403 INSUFFICIENT_SCOPE`、無効・期限切れ・失効済みの場合は`401 INVALID_TOKEN`を返す。scopeを持たないAPIキーは、scope保護されたAPIへアクセスできない。
+scopeが不足する場合は`403 INSUFFICIENT_SCOPE`、membershipがない場合は`403 WORKSPACE_ACCESS_REQUIRED`、無効・期限切れ・失効済みの場合は`401 INVALID_TOKEN`を返す。scopeを持たないAPIキーは、scope保護されたAPIへアクセスできない。
 
 APIキー作成例:
 
@@ -89,19 +89,19 @@ APIキー作成例:
 
 作成時に指定できるscopeはサーバー側の許可リストで検証し、重複scopeは除去する。
 
-## ユーザーロール認可
+## Workspaceロール認可
 
-JWT利用者はDB上の最新roleで認可する。Token内の古いroleだけでは判定しない。
+JWTとAPIキーの利用者は、DB上のactive workspace membershipに保存された最新roleで認可する。Token内および`auth.users.role`の古いroleだけでは判定しない。`auth.users.role`はmigration互換のため残し、新しい認可の正本はmembershipとする。
 
 ```text
 admin      すべての現在実装済み操作
 editor     RecordとSourceの閲覧・作成・更新・論理削除・復元
 reviewer   RecordとSourceの閲覧
 viewer     RecordとSourceの閲覧
-service    JWTによるRecord・Source操作は不可。APIキーscopeを利用
+service    許可されたAPIキーscopeとmembership roleの両方に従う
 ```
 
-APIキーの発行・一覧・失効は現在`admin`専用とする。role不足は`403 INSUFFICIENT_ROLE`を返す。DBにも`admin / editor / reviewer / viewer / service`のCHECK制約を設定する。
+APIキーの発行・一覧・失効は現在`admin`専用とする。APIキーもrole検査を迂回しない。role不足は`403 INSUFFICIENT_ROLE`を返す。DBにも`admin / editor / reviewer / viewer / service`のCHECK制約を設定する。
 
 監査ログの一覧・詳細APIもJWTで認証した`admin`専用とする。監査情報には変更前後の属性やactor情報が含まれるため、APIキーには閲覧scopeを与えない。APIキーによるSource／Record変更自体は、APIキーIDをactorとして監査する。
 
@@ -131,9 +131,11 @@ ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=change_this_admin_password
 ADMIN_DISPLAY_NAME=SARA Administrator
 ADMIN_LOCALE=ja
+WORKSPACE_NAME=SARA Workspace
+WORKSPACE_SLUG=default
 ```
 
-`ADMIN_PASSWORD`は12文字以上を要求する。seedはメールアドレスを一意キーとして冪等に実行できる。
+`ADMIN_PASSWORD`は12文字以上を要求する。seedは管理者、singleton workspace、admin membershipを冪等に作成する。
 
 開発用のデフォルトパスワードを本番で使用してはならない。
 

@@ -42,7 +42,7 @@ Content-Type: application/json
 
 Importごとに`source_type=imported`のSourceを作成し、作成した全Recordへ関連付ける。原文は`import_jobs.raw_content`へ保存するが、APIレスポンスには返さない。本文のSHA-256、byte数、ファイル名も保持する。
 
-行ごとに短いトランザクションを使用する。不正行だけを`import_items.status=failed`として記録し、正常行は保存する。
+行ごとに短いトランザクションを使用する。不正行だけを`import_items.status=failed`として記録し、正常行は保存する。同期・非同期ImportのRecordは必ず`draft`から開始し、それ以外の`status`を指定した行は失敗する。
 
 ```text
 completed             全行成功
@@ -50,7 +50,7 @@ completed_with_errors 成功行と失敗行が混在
 failed                parse失敗または全行失敗
 ```
 
-JSONは配列、`{"records": [...]}`、単一objectを受け付ける。JSONLは空行を無視する。CSVは先頭行をheaderとして、quoted fieldとescaped quoteを処理する。
+JSONは配列、`{"records": [...]}`、単一objectを受け付ける。JSONLは空行を無視する。CSVは先頭行をheaderとして、quoted fieldとescaped quoteを処理する。これらの解析、行数上限、Record正規化、draft限定、score範囲検証は`@sara-knowledge/domain-contracts`で同期APIと非同期Workerが共有する。
 
 ## Export
 
@@ -109,7 +109,7 @@ POST     /api/v1/exports       exports:create、admin／editor／reviewer
 GET      /api/v1/exports/:id   exports:create、admin／editor／reviewer
 ```
 
-Job一覧・詳細は認証主体の所有Jobだけを返す。Importで生成したSourceとRecordの作成は既存監査ログへ記録する。Job自体の専用監査actionは未実装。
+Job一覧・詳細はactive singleton workspace memberへ共有する。Importで生成したSourceとRecordの作成は既存監査ログへ記録する。Job自体の専用監査actionは未実装。
 
 ## 次工程
 
@@ -117,9 +117,10 @@ Job一覧・詳細は認証主体の所有Jobだけを返す。Importで生成�
 - [Done] 原文、checksum、冪等性、部分成功、行別エラー
 - [Done] MinIO原本AssetとRedis Queue
 - [Done] Workerによるchunk処理、再開、取消、進捗
+- [Done] 同期API／非同期WorkerのImport解析・正規化契約共有
 - [Done] Dataset Definition・不変Snapshot・manifest生成
 - [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
 - [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
 - [Done] Relation Evidence・Entity Alias・候補検証フロー
-- [Next] Bulk Event ingestion・bounded graph traversal
+- [Next] Job lease／heartbeat／claim generationと試験分割
 - [Later] Parquet／Apache Arrow

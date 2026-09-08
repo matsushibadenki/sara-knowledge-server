@@ -5,8 +5,10 @@ COPY package.json bun.lock ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/admin/package.json ./apps/admin/package.json
 COPY apps/worker/package.json ./apps/worker/package.json
+COPY packages/domain-contracts/package.json ./packages/domain-contracts/package.json
 RUN bun install --frozen-lockfile
 COPY apps/worker/src ./apps/worker/src
+COPY packages/domain-contracts/src ./packages/domain-contracts/src
 
 WORKDIR /app/apps/worker
 

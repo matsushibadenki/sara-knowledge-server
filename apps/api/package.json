@@ -12,6 +12,7 @@
     "db:seed": "bun src/db/seed.js"
   },
   "dependencies": {
+    "@sara-knowledge/domain-contracts": "workspace:*",
     "drizzle-orm": "^0.38.0",
     "hono": "^4.7.0",
     "jose": "^6.0.0",

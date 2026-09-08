@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts-and-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run unit and shared contract tests
+        run: bun test
+
+      - name: Build API and Worker images
+        run: docker compose build api worker
+
+      - name: Start isolated dependencies
+        run: docker compose up -d postgres redis minio minio-init
+
+      - name: Apply all migrations to an empty database
+        run: docker compose run --rm api bun run db:migrate
+
+      - name: Start API and real Worker
+        run: docker compose up -d --wait api worker
+
+      - name: Run full integration suite
+        run: docker compose exec -T -e RUN_INTEGRATION=1 -e MINIO_PUBLIC_ENDPOINT=http://minio:9000 api bun test
+
+      - name: Show service logs after failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200 api worker postgres redis minio
+
+      - name: Stop isolated services
+        if: always()
+        run: docker compose down -v --remove-orphans
