@@ -37,6 +37,9 @@ jobs:
       - name: Seed the integration administrator
         run: docker compose run --rm api bun run db:seed
 
+      - name: Verify job recovery without Redis notifications
+        run: bash scripts/test-job-recovery.sh
+
       - name: Start API and real Worker
         run: docker compose up -d --wait api worker
 

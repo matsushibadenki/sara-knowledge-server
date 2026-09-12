@@ -176,6 +176,20 @@
       "when": 1788829388708,
       "tag": "0024_aspiring_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789193308036,
+      "tag": "0025_peaceful_silver_fox",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789193997681,
+      "tag": "0026_chief_tiger_shark",
+      "breakpoints": true
     }
   ]
 }

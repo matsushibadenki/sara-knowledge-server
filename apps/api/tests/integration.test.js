@@ -804,6 +804,9 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   expect(asyncImport.response.status).toBe(202);
   expect(asyncImport.body.data.mode).toBe('async');
   expect(asyncImport.body.data.status).toBe('queued');
+  expect(asyncImport.body.data.claim_generation).toBe(0);
+  expect(asyncImport.body.data.attempt_count).toBe(0);
+  expect(asyncImport.body.data.max_attempts).toBe(3);
   createdImportJobIds.push(asyncImport.body.data.id);
   createdSourceIds.push(asyncImport.body.data.source_id);
   createdObjectKeys.push(asyncImport.body.data.object_key);
@@ -819,6 +822,10 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   expect(asyncImportDetail.body.data.succeeded_count).toBe(3);
   expect(asyncImportDetail.body.data.failed_count).toBe(1);
   expect(asyncImportDetail.body.data.items).toHaveLength(4);
+  expect(asyncImportDetail.body.data.claim_generation).toBe(1);
+  expect(asyncImportDetail.body.data.attempt_count).toBe(1);
+  expect(asyncImportDetail.body.data.heartbeat_at).toBeNull();
+  expect(asyncImportDetail.body.data.lease_expires_at).toBeNull();
   createdRecordIds.push(...asyncImportDetail.body.data.items.map((item) => item.record_id).filter(Boolean));
 
   const asyncExport = await request('/api/v1/exports/async', {
@@ -830,6 +837,9 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   });
   expect(asyncExport.response.status).toBe(202);
   expect(asyncExport.body.data.status).toBe('queued');
+  expect(asyncExport.body.data.claim_generation).toBe(0);
+  expect(asyncExport.body.data.attempt_count).toBe(0);
+  expect(asyncExport.body.data.max_attempts).toBe(3);
   createdExportJobIds.push(asyncExport.body.data.id);
   createdObjectKeys.push(asyncExport.body.data.object_key);
 
@@ -841,6 +851,11 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   }
   expect(asyncExportDetail.body.data.status).toBe('completed');
   expect(asyncExportDetail.body.data.record_count).toBe(3);
+  expect(asyncExportDetail.body.data.claim_generation).toBe(1);
+  expect(asyncExportDetail.body.data.attempt_count).toBe(1);
+  expect(asyncExportDetail.body.data.heartbeat_at).toBeNull();
+  expect(asyncExportDetail.body.data.lease_expires_at).toBeNull();
+  createdObjectKeys.push(asyncExportDetail.body.data.object_key);
   const asyncDownload = await app.request(`/api/v1/exports/${asyncExport.body.data.id}/download`, { headers });
   expect(asyncDownload.status).toBe(200);
   expect(asyncDownload.headers.get('X-Content-SHA256')).toStartWith('sha256:');
@@ -1291,6 +1306,9 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   expect(asyncEventJob.response.status).toBe(202);
   expect(asyncEventJob.body.data.status).toBe('queued');
   expect(asyncEventJob.body.data.event_count).toBe(501);
+  expect(asyncEventJob.body.data.claim_generation).toBe(0);
+  expect(asyncEventJob.body.data.attempt_count).toBe(0);
+  expect(asyncEventJob.body.data.max_attempts).toBe(3);
   createdMemoryJobIds.push(asyncEventJob.body.data.id);
   const [storedAsyncJob] = await db.select({ objectKey: memoryEventIngestionJobs.objectKey })
     .from(memoryEventIngestionJobs).where(eq(memoryEventIngestionJobs.id, asyncEventJob.body.data.id));
@@ -1312,6 +1330,10 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   expect(asyncEventDetail.body.data.status).toBe('completed');
   expect(asyncEventDetail.body.data.processed_count).toBe(501);
   expect(asyncEventDetail.body.data.ingestion_batch_id).not.toBeNull();
+  expect(asyncEventDetail.body.data.claim_generation).toBe(1);
+  expect(asyncEventDetail.body.data.attempt_count).toBe(1);
+  expect(asyncEventDetail.body.data.heartbeat_at).toBeNull();
+  expect(asyncEventDetail.body.data.lease_expires_at).toBeNull();
   createdMemoryBatchIds.push(asyncEventDetail.body.data.ingestion_batch_id);
   const asyncCreatedEvents = await db.select({ id: memoryEvents.id }).from(memoryEvents)
     .where(eq(memoryEvents.ingestionBatchId, asyncEventDetail.body.data.ingestion_batch_id));

@@ -109,7 +109,8 @@ PostgreSQLの初期化時と冪等migrationで以下を有効化する。既存v
 - 非同期Jobは`queued → processing → completed|failed|cancelled`で遷移する
 - Worker claim対象だけを含む部分索引を使用し、`FOR UPDATE SKIP LOCKED`で複数Workerの競合待ちを避ける
 - MinIO object key、worker ID、開始時刻、処理済み件数、取消要求をJobへ保存する
-- 5分以上古いprocessing JobはWorker起動時にqueuedへ戻し、既存Import Itemの最大行から再開する。現実装にlease／heartbeat／claim世代はなく、稼働中Jobの誤回収防止はG0の修復対象
+- 非同期Jobはclaim時に世代と試行回数を増やし、heartbeatでleaseを延長する。定期reaperは期限切れleaseだけを再queueし、進捗・完了・失敗はworker IDとclaim世代が一致する場合だけ確定する
+- Redisは起床通知に限定し、接続不能・timeout時もPostgreSQLの`SKIP LOCKED` pollingを継続する。Import／Export／Memory Eventはround-robinでclaimする
 - Dataset Definitionは再利用可能な抽出条件とmanifest形式を保持する
 - Dataset Snapshotは作成時点のDefinition revision、filter、Record Version、順序を固定する
 - Snapshot作成後にRecordの現在版やDefinitionを変更しても、既存Snapshotの構成は変更しない
@@ -167,8 +168,9 @@ docker compose exec api bun run db:migrate
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
 - [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
 - [Done] Asset API・upload authorization・provenance binding
-- [Next] Record参照とworkspace境界、承認／revision整合性の修復
-- [Next] Worker lease／claim世代、Asset確定・参照保持、backup／restore試験
+- [Done] Record参照とworkspace境界、承認／revision整合性の修復
+- [Done] Worker lease／heartbeat／claim世代、上限付きretry、定期reaper、Redis停止時polling
+- [Next] Asset確定・参照保持、DB＋object backup／restore試験
 - [Later] Asset processing jobs・media metadata extraction・derived-Asset provenance
 
 ## 将来のMemory Schema

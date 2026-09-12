@@ -1,12 +1,12 @@
 # Roadmap
 
-更新: 2026-09-08。[設計評価と方針](database-direction-review-2026-09-05.md)に基づく。進捗と実装順序の正本は本書。過去のprogress文書と[改訂前の全項目](roadmap-archive-2026-09-05.md)は履歴であり、そこにあるNextは現在の着手指示ではない。
+更新: 2026-09-12。[設計評価と方針](database-direction-review-2026-09-05.md)に基づく。進捗と実装順序の正本は本書。過去のprogress文書と[改訂前の全項目](roadmap-archive-2026-09-05.md)は履歴であり、そこにあるNextは現在の着手指示ではない。
 
 - `[Done]` implemented in the current codebase
 - `[Next]` high-priority unfinished work
 - `[Later]` planned, but not the closest next step
 
-Doneは機能の存在を示し、本番品質・全経路の正しさを保証しない。2026-09-08の確認は基本・共有契約テスト17 pass、統合テストを含むDocker実行14 pass／402 assertions。各gateは以下の受け入れ試験を実行し、結果を保存するまで未完了とする。
+Doneは機能の存在を示し、本番品質・全経路の正しさを保証しない。2026-09-12にG0.4のlease切れ、retry上限、旧claim遮断、Redis停止時DB polling、Job種別公平性をDockerで確認した。各gateは以下の受け入れ試験を実行し、結果を保存するまで未完了とする。
 
 ## 製品目標
 
@@ -25,7 +25,7 @@ English: Prove a revision-aware knowledge database with traceable evidence and c
 - [Done] Source／Record変更の同一transaction監査、admin監査API
 - [Done] Tag／Annotation／Evaluation、Version固定レビューの入口
 - [Done] JSON／JSONL／CSV同期・非同期Import／Export、原本・hash・行別結果・冪等キー
-- [Done] WorkerのSKIP LOCKED claim、chunk進捗、取消、起動時stale Job再開
+- [Done] WorkerのSKIP LOCKED claim、chunk進捗、取消、lease／heartbeat、世代fence、上限付きretry、定期reaper
 - [Done] Dataset Definition、不変Snapshotメンバー、manifest、Training Run／Metric
 - [Done] Event／Experience／Entity／Concept／Relation、Alias／Evidence／Verification API
 - [Done] Bulk Event、bounded traversal、HMAC／nonce、501〜10,000 Event非同期取り込み
@@ -39,12 +39,12 @@ English: Prove a revision-aware knowledge database with traceable evidence and c
 - [Done] **G0.2b Memory revision:** Memoryの更新、Relation Evidence追加、Verificationにrevision競合制御を追加。承認済み／却下済み内容の編集をcandidateへ戻し、Decisionに対象revisionと内容snapshotを固定。migration前backupからの復元・再migrationも確認。
 - [Done] **G0.3a 共有契約とCI:** Event入力schema／DB変換、Import解析／正規化をAPIとWorkerで共有。空DBへの全migration、共有契約テスト、実Worker統合試験を同一CI jobへ追加。
 - [Next] **G0.3b 試験分割:** 巨大な統合ケースを認証、Record／Review、Import／Export、Dataset／Training、Memory／Assetへ分け、共通fixtureの失敗時cleanupを保証する。
-- [Later] **G0.4 ジョブ復旧:** lease／heartbeat／claim世代、世代条件付き確定、定期reaper、retry上限を導入。Redis停止でもDB pollingを継続し、Job種別の飢餓を防ぐ。
-- [Later] **G0.5 Asset確定と保全:** 一時uploadと確定版を分離。参照保持、再試行可能な削除Job、孤立object照合、DB＋object backup／restore手順を追加する。
+- [Done] **G0.4 ジョブ復旧:** lease／heartbeat／claim世代、世代条件付き確定、定期reaper、retry上限を導入。Redis通知が停止してもtimeout付きでDB pollingを継続し、round-robin claimでJob種別の飢餓を防止。専用Docker試験で回帰確認。
+- [Next] **G0.5 Asset確定と保全:** 一時uploadと確定版を分離。参照保持、再試行可能な削除Job、孤立object照合、DB＋object backup／restore手順を追加する。
 
-残る順序はG0.3b → G0.4 → G0.5。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
+残る順序はG0.3b → G0.5。G0.4は先行して完了した。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
 
-**完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。長時間Job中の別Worker起動、旧claimの遅延完了、Redis停止、途中kill、再PUT・object削除失敗を試し、重複効果と不正なcompletedを0件にする。別環境へDB＋objectを復元して参照とhashが一致する。これらは現時点では未達。
+**完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。Jobのlease切れ、旧claim、Redis停止、retry上限と公平性は確認済み。長時間処理の途中kill、Asset再PUT・object削除失敗、別環境へのDB＋object復元を追加確認し、参照とhashを一致させる。
 
 ## G1 — 訂正できる知識モデル（G0完了後）
 

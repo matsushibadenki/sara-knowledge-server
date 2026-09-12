@@ -118,9 +118,10 @@ Job一覧・詳細はactive singleton workspace memberへ共有する。Import�
 - [Done] MinIO原本AssetとRedis Queue
 - [Done] Workerによるchunk処理、再開、取消、進捗
 - [Done] 同期API／非同期WorkerのImport解析・正規化契約共有
+- [Done] Job lease／heartbeat／claim generation、上限付きretry、定期reaper、Redis停止時DB polling
 - [Done] Dataset Definition・不変Snapshot・manifest生成
 - [Done] 学習Run・Snapshot利用履歴・評価結果の追跡
 - [Done] Event・Experience・Entity・Concept・Relationの最小Memory Schema
 - [Done] Relation Evidence・Entity Alias・候補検証フロー
-- [Next] Job lease／heartbeat／claim generationと試験分割
+- [Next] 統合試験の責務別分割とAsset確定／孤立object回収
 - [Later] Parquet／Apache Arrow

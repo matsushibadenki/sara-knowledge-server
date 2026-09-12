@@ -43,6 +43,10 @@ const asyncExportSchema = exportSchema.extend({
   idempotency_key: z.string().trim().min(8).max(200),
 });
 const listSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) });
+const configuredJobMaxAttempts = Number(process.env.JOB_MAX_ATTEMPTS || 3);
+const jobMaxAttempts = Number.isInteger(configuredJobMaxAttempts)
+  ? Math.max(1, Math.min(100, configuredJobMaxAttempts))
+  : 3;
 
 function errorResponse(c, status, code, message, details = []) {
   return c.json({ data: null, meta: {}, error: { code, message, details } }, status);
@@ -65,6 +69,12 @@ function serializeImport(job) {
     failed_count: job.failedCount,
     processed_count: job.processedCount,
     cancel_requested: job.cancelRequested,
+    claim_generation: job.claimGeneration,
+    attempt_count: job.attemptCount,
+    max_attempts: job.maxAttempts,
+    heartbeat_at: job.heartbeatAt,
+    lease_expires_at: job.leaseExpiresAt,
+    next_attempt_at: job.nextAttemptAt,
     error_message: job.errorMessage,
     source_id: job.sourceId,
     created_by: job.createdBy,
@@ -86,6 +96,12 @@ function serializeExport(job) {
     content_hash: job.contentHash,
     object_key: job.objectKey,
     cancel_requested: job.cancelRequested,
+    claim_generation: job.claimGeneration,
+    attempt_count: job.attemptCount,
+    max_attempts: job.maxAttempts,
+    heartbeat_at: job.heartbeatAt,
+    lease_expires_at: job.leaseExpiresAt,
+    next_attempt_at: job.nextAttemptAt,
     error_message: job.errorMessage,
     created_by: job.createdBy,
     created_at: job.createdAt,
@@ -151,7 +167,7 @@ importRoutes.post('/async', async (c) => {
       id: jobId, mode: 'async', status: 'queued', format: result.data.format,
       idempotencyKey: result.data.idempotency_key, fileName: result.data.file_name || null,
       contentHash, byteSize, rawContent: null, objectKey, options: result.data.defaults || {},
-      sourceId, createdBy: auth.sub, createdAt: now,
+      sourceId, maxAttempts: jobMaxAttempts, createdBy: auth.sub, createdAt: now,
     }).returning();
     const snapshot = sourceAuditSnapshot(source);
     await appendAuditLog(tx, c, {
@@ -252,7 +268,8 @@ exportRoutes.post('/async', async (c) => {
     id, mode: 'async', status: 'queued', format: result.data.format,
     idempotencyKey: result.data.idempotency_key,
     filters: { status: result.data.status, record_type: result.data.record_type, language_code: result.data.language_code },
-    objectKey, contentHash: null, createdBy: auth.sub, createdAt: new Date(), completedAt: null,
+    objectKey, contentHash: null, maxAttempts: jobMaxAttempts,
+    createdBy: auth.sub, createdAt: new Date(), completedAt: null,
   }).returning();
   await enqueueBackgroundJob('export', job.id);
   return c.json({ data: serializeExport(job), meta: { replayed: false }, error: null }, 202);

@@ -33,6 +33,10 @@ const verificationState = z.enum(['unverified', 'candidate', 'verified', 'reject
 const initialVerificationState = z.enum(['unverified', 'candidate']);
 const probability = z.number().finite().min(0).max(1);
 const nullableDate = z.coerce.date().nullable().optional();
+const configuredJobMaxAttempts = Number(process.env.JOB_MAX_ATTEMPTS || 3);
+const jobMaxAttempts = Number.isInteger(configuredJobMaxAttempts)
+  ? Math.max(1, Math.min(100, configuredJobMaxAttempts))
+  : 3;
 
 const experienceSchema = z.object({
   experience_uid: z.string().trim().min(1).max(200),
@@ -162,6 +166,8 @@ const serializeEventJob = (item) => ({
   id: item.id, batch_uid: item.batchUid, content_hash: item.contentHash, status: item.status,
   event_count: item.eventCount, processed_count: item.processedCount,
   cancel_requested: item.cancelRequested, ingestion_batch_id: item.ingestionBatchId,
+  claim_generation: item.claimGeneration, attempt_count: item.attemptCount, max_attempts: item.maxAttempts,
+  heartbeat_at: item.heartbeatAt, lease_expires_at: item.leaseExpiresAt, next_attempt_at: item.nextAttemptAt,
   error_message: item.errorMessage, created_at: item.createdAt,
   started_at: item.startedAt, completed_at: item.completedAt,
 });
@@ -398,7 +404,7 @@ memoryRoutes.post('/events/async', requireScopes('memory:write'), requireRoles('
   try {
     const [job] = await db.insert(memoryEventIngestionJobs).values({
       id: jobId, batchUid: input.data.batch_uid, contentHash: hash, objectKey,
-      eventCount: input.data.events.length, createdBy: ownerId,
+      eventCount: input.data.events.length, maxAttempts: jobMaxAttempts, createdBy: ownerId,
     }).returning();
     await enqueueBackgroundJob('memory-events', job.id);
     return c.json({ data: serializeEventJob(job), meta: { replayed: false }, error: null }, 202);

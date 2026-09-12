@@ -185,8 +185,9 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Done] SARA／external Worker HTTPS ingestion・HMAC署名・replay protection
 - [Done] Queue-backed asynchronous Event ingestion for 501〜10,000 events
 - [Done] Asset API・upload authorization・provenance binding
-- [Next] Record参照・workspace権限・承認とrevisionの整合性修復
-- [Next] 共有domain service・CI統合試験・Worker lease／再実行・Asset確定／復元保証
+- [Done] Record参照・workspace権限・承認とrevisionの整合性修復
+- [Done] 共有domain contract、CI統合試験、Worker lease／heartbeat／claim世代／再実行
+- [Next] CI統合試験の責務別分割、Asset確定／参照保持、DB＋object復元保証
 
 ### 将来設計
 

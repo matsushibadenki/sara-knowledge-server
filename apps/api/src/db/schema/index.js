@@ -357,6 +357,12 @@ export const importJobs = datasetSchema.table('import_jobs', {
   processedCount: integer('processed_count').notNull().default(0),
   cancelRequested: boolean('cancel_requested').notNull().default(false),
   workerId: text('worker_id'),
+  claimGeneration: integer('claim_generation').notNull().default(0),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(3),
+  heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
   errorMessage: text('error_message'),
   sourceId: uuid('source_id').references(() => sources.id),
   createdBy: uuid('created_by').notNull().references(() => users.id),
@@ -368,12 +374,15 @@ export const importJobs = datasetSchema.table('import_jobs', {
     .on(table.createdBy, table.idempotencyKey),
   creatorTimelineIndex: index('import_jobs_creator_timeline_idx').on(table.createdBy, table.createdAt),
   sourceIdIndex: index('import_jobs_source_id_idx').on(table.sourceId),
-  runningIndex: index('import_jobs_running_idx').on(table.createdAt)
-    .where(sql`${table.status} IN ('queued', 'running', 'processing')`),
+  runningIndex: index('import_jobs_running_idx').on(table.nextAttemptAt, table.createdAt)
+    .where(sql`${table.mode} = 'async' AND ${table.status} = 'queued'`),
+  leaseIndex: index('import_jobs_expired_lease_idx').on(table.leaseExpiresAt)
+    .where(sql`${table.mode} = 'async' AND ${table.status} = 'processing'`),
   modeCheck: check('import_jobs_mode_check', sql`${table.mode} IN ('sync', 'async')`),
   formatCheck: check('import_jobs_format_check', sql`${table.format} IN ('json', 'jsonl', 'csv')`),
   statusCheck: check('import_jobs_status_check', sql`${table.status} IN ('queued', 'running', 'processing', 'completed', 'completed_with_errors', 'failed', 'cancelled')`),
   countsCheck: check('import_jobs_counts_check', sql`${table.totalCount} >= 0 AND ${table.succeededCount} >= 0 AND ${table.failedCount} >= 0`),
+  attemptsCheck: check('import_jobs_attempts_check', sql`${table.claimGeneration} >= 0 AND ${table.attemptCount} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 100 AND ${table.attemptCount} <= ${table.maxAttempts}`),
   completedCountsCheck: check(
     'import_jobs_completed_counts_check',
     sql`${table.status} IN ('queued', 'running', 'processing', 'cancelled') OR ${table.totalCount} = ${table.succeededCount} + ${table.failedCount}`,
@@ -409,6 +418,12 @@ export const exportJobs = datasetSchema.table('export_jobs', {
   objectKey: text('object_key'),
   cancelRequested: boolean('cancel_requested').notNull().default(false),
   workerId: text('worker_id'),
+  claimGeneration: integer('claim_generation').notNull().default(0),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(3),
+  heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
   errorMessage: text('error_message'),
   createdBy: uuid('created_by').notNull().references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -418,12 +433,15 @@ export const exportJobs = datasetSchema.table('export_jobs', {
   creatorTimelineIndex: index('export_jobs_creator_timeline_idx').on(table.createdBy, table.createdAt),
   creatorIdempotencyUnique: uniqueIndex('export_jobs_creator_idempotency_unique')
     .on(table.createdBy, table.idempotencyKey).where(sql`${table.idempotencyKey} IS NOT NULL`),
-  queuedIndex: index('export_jobs_queued_idx').on(table.createdAt)
-    .where(sql`${table.status} IN ('queued', 'processing')`),
+  queuedIndex: index('export_jobs_queued_idx').on(table.nextAttemptAt, table.createdAt)
+    .where(sql`${table.mode} = 'async' AND ${table.status} = 'queued'`),
+  leaseIndex: index('export_jobs_expired_lease_idx').on(table.leaseExpiresAt)
+    .where(sql`${table.mode} = 'async' AND ${table.status} = 'processing'`),
   modeCheck: check('export_jobs_mode_check', sql`${table.mode} IN ('sync', 'async')`),
   formatCheck: check('export_jobs_format_check', sql`${table.format} IN ('json', 'jsonl', 'csv')`),
   statusCheck: check('export_jobs_status_check', sql`${table.status} IN ('queued', 'processing', 'completed', 'failed', 'cancelled')`),
   countsCheck: check('export_jobs_counts_check', sql`${table.recordCount} >= 0 AND ${table.byteSize} >= 0`),
+  attemptsCheck: check('export_jobs_attempts_check', sql`${table.claimGeneration} >= 0 AND ${table.attemptCount} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 100 AND ${table.attemptCount} <= ${table.maxAttempts}`),
 }));
 
 export const datasetDefinitions = datasetSchema.table('dataset_definitions', {
@@ -602,6 +620,12 @@ export const memoryEventIngestionJobs = memorySchema.table('event_ingestion_jobs
   processedCount: integer('processed_count').notNull().default(0),
   cancelRequested: boolean('cancel_requested').notNull().default(false),
   workerId: text('worker_id'),
+  claimGeneration: integer('claim_generation').notNull().default(0),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(3),
+  heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
   ingestionBatchId: uuid('ingestion_batch_id').references(() => memoryEventIngestionBatches.id),
   errorMessage: text('error_message'),
   createdBy: uuid('created_by').notNull().references(() => users.id),
@@ -611,11 +635,14 @@ export const memoryEventIngestionJobs = memorySchema.table('event_ingestion_jobs
 }, (table) => ({
   creatorBatchUnique: uniqueIndex('memory_event_jobs_creator_batch_unique').on(table.createdBy, table.batchUid),
   creatorTimelineIndex: index('memory_event_jobs_creator_timeline_idx').on(table.createdBy, table.createdAt),
-  queuedIndex: index('memory_event_jobs_queued_idx').on(table.createdAt)
-    .where(sql`${table.status} IN ('queued', 'processing')`),
+  queuedIndex: index('memory_event_jobs_queued_idx').on(table.nextAttemptAt, table.createdAt)
+    .where(sql`${table.status} = 'queued'`),
+  leaseIndex: index('memory_event_jobs_expired_lease_idx').on(table.leaseExpiresAt)
+    .where(sql`${table.status} = 'processing'`),
   ingestionBatchIdIndex: index('memory_event_jobs_ingestion_batch_id_idx').on(table.ingestionBatchId),
   statusCheck: check('memory_event_jobs_status_check', sql`${table.status} IN ('queued', 'processing', 'completed', 'failed', 'cancelled')`),
   countsCheck: check('memory_event_jobs_counts_check', sql`${table.eventCount} BETWEEN 501 AND 10000 AND ${table.processedCount} BETWEEN 0 AND ${table.eventCount}`),
+  attemptsCheck: check('memory_event_jobs_attempts_check', sql`${table.claimGeneration} >= 0 AND ${table.attemptCount} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 100 AND ${table.attemptCount} <= ${table.maxAttempts}`),
 }));
 
 export const memoryEvents = memorySchema.table('events', {
