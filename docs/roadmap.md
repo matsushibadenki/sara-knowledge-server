@@ -38,11 +38,11 @@ English: Prove a revision-aware knowledge database with traceable evidence and c
 - [Done] **G0.2a Record承認整合性:** 一般POST／PATCH／同期Import／Workerからworkflow状態を直接確定できないようにし、すべてdraftとして作成。承認済みRecordの新Versionをdraftへ戻し、Reviewを旧Versionへ固定。
 - [Done] **G0.2b Memory revision:** Memoryの更新、Relation Evidence追加、Verificationにrevision競合制御を追加。承認済み／却下済み内容の編集をcandidateへ戻し、Decisionに対象revisionと内容snapshotを固定。migration前backupからの復元・再migrationも確認。
 - [Done] **G0.3a 共有契約とCI:** Event入力schema／DB変換、Import解析／正規化をAPIとWorkerで共有。空DBへの全migration、共有契約テスト、実Worker統合試験を同一CI jobへ追加。
-- [Next] **G0.3b 試験分割:** 認証・権限・ログイン制限を独立した統合テストへ移し、失敗時にも登録済み資源を片付けるfixtureを導入した。残る巨大な統合ケースをRecord／Review、Import／Export、Dataset／Training、Memory／Assetへ分け、共通fixtureのcleanupを保証する。
+- [Next] **G0.3b 試験分割:** 認証・権限・ログイン制限・Refresh競合・APIキー失効を独立した統合テストへ移した。共通のLIFO cleanup fixtureを導入し、別ユーザーによるRecord承認・版固定・承認後draft化も独立テストで確認した。巨大な統合ケースに残るRecord／Review依存と、Import／Export、Dataset／Training、Memory／Assetをさらに分ける。
 
-English: Auth and authorization now run in independent integration tests with failure-safe fixture cleanup; the remaining domains still need separation.
+English: Authentication, refresh rotation, and a separate-reviewer Record workflow now have independent integration coverage with failure-safe fixture cleanup. Remaining domains still need separation.
 
-简体中文：认证和权限检查已移至独立集成测试，并加入失败时的资源清理；其余领域仍需拆分。
+简体中文：认证、刷新令牌轮换和跨用户 Record 审核已有独立集成测试，并加入失败时的资源清理；其余领域仍需拆分。
 - [Done] **G0.4 ジョブ復旧:** lease／heartbeat／claim世代、世代条件付き確定、定期reaper、retry上限を導入。Redis通知が停止してもtimeout付きでDB pollingを継続し、round-robin claimでJob種別の飢餓を防止。専用Docker試験で回帰確認。
 - [Next] **G0.5 Asset確定と保全:** 一時uploadと確定版の分離、後着PUTによるready原本の変更防止は実装済み。参照保持、再試行可能な削除Job、孤立object照合、DB＋object backup／restore手順が残る。
 

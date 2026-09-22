@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import app from '../src/app.js';
 import { db } from '../src/db/client.js';
 import { apiKeys, refreshTokens, users, workspaceMemberships } from '../src/db/schema/index.js';
@@ -9,6 +9,7 @@ import { signAccessToken } from '../src/auth/tokens.js';
 import {
   clearLoginAttempts, getLoginRateLimitConfig,
 } from '../src/auth/login-rate-limit.js';
+import { createIntegrationFixture } from './support/integration-fixture.js';
 
 const integrationTest = process.env.RUN_INTEGRATION === '1' ? test : test.skip;
 const workspaceId = '00000000-0000-4000-8000-000000000001';
@@ -18,36 +19,28 @@ async function request(path, options = {}) {
   return { response, body: await response.json() };
 }
 
-// Register identifiers before the write so even a failure between writes and assertions is recoverable.
-function fixture() {
-  const userIds = [];
-  const apiKeyIds = [];
-  const refreshTokenHashes = [];
-  const rateLimitEmails = [];
+function authFixture() {
+  const scope = createIntegrationFixture();
   return {
-    userIds, apiKeyIds, refreshTokenHashes, rateLimitEmails,
-    async cleanup() {
-      const failures = [];
-      const attempt = async (operation) => {
-        try { await operation(); } catch (error) { failures.push(error); }
-      };
-      if (apiKeyIds.length) await attempt(() => db.delete(apiKeys).where(inArray(apiKeys.id, apiKeyIds)));
-      if (refreshTokenHashes.length) await attempt(() => db.delete(refreshTokens).where(inArray(refreshTokens.tokenHash, refreshTokenHashes)));
-      if (userIds.length) {
-        await attempt(() => db.delete(workspaceMemberships).where(inArray(workspaceMemberships.userId, userIds)));
-        await attempt(() => db.delete(users).where(inArray(users.id, userIds)));
-      }
-      for (const email of rateLimitEmails) await attempt(() => clearLoginAttempts(email));
-      if (failures.length) throw new AggregateError(failures, 'Auth integration fixture cleanup failed');
+    cleanup: () => scope.cleanup(),
+    trackUser(id) {
+      // Register before insertion; cleanup still runs if insertion partially succeeds.
+      scope.defer(() => db.delete(users).where(eq(users.id, id)));
+      scope.defer(() => db.delete(workspaceMemberships).where(eq(workspaceMemberships.userId, id)));
     },
+    trackApiKey(id) { scope.defer(() => db.delete(apiKeys).where(eq(apiKeys.id, id))); },
+    trackRefreshToken(token) {
+      scope.defer(async () => db.delete(refreshTokens).where(eq(refreshTokens.tokenHash, await hashSecret(token))));
+    },
+    trackRateLimitEmail(email) { scope.defer(() => clearLoginAttempts(email)); },
   };
 }
 
 integrationTest('workspace membership and role restrictions are enforced independently', async () => {
-  const scope = fixture();
+  const scope = authFixture();
   try {
     const viewerId = crypto.randomUUID();
-    scope.userIds.push(viewerId);
+    scope.trackUser(viewerId);
     const viewerEmail = `viewer-${viewerId}@example.com`;
     await db.insert(users).values({
       id: viewerId, email: viewerEmail, displayName: 'Independent Viewer', status: 'active',
@@ -58,7 +51,7 @@ integrationTest('workspace membership and role restrictions are enforced indepen
     const viewerHeaders = { Authorization: `Bearer ${viewerToken}`, 'Content-Type': 'application/json' };
 
     const outsiderId = crypto.randomUUID();
-    scope.userIds.push(outsiderId);
+    scope.trackUser(outsiderId);
     const outsiderEmail = `outsider-${outsiderId}@example.com`;
     await db.insert(users).values({
       id: outsiderId, email: outsiderEmail, displayName: 'Independent Outsider', status: 'active',
@@ -68,7 +61,7 @@ integrationTest('workspace membership and role restrictions are enforced indepen
 
     const outsiderKeyId = crypto.randomUUID();
     const outsiderKey = `sara_${crypto.randomUUID().replaceAll('-', '')}`;
-    scope.apiKeyIds.push(outsiderKeyId);
+    scope.trackApiKey(outsiderKeyId);
     await db.insert(apiKeys).values({
       id: outsiderKeyId, userId: outsiderId, name: 'Independent outsider key',
       keyPrefix: outsiderKey.slice(0, 17), keyHash: await hashSecret(outsiderKey), scopes: ['records:read'],
@@ -104,14 +97,14 @@ integrationTest('workspace membership and role restrictions are enforced indepen
 });
 
 integrationTest('API key scope and workspace membership are enforced independently', async () => {
-  const scope = fixture();
+  const scope = authFixture();
   try {
     const adminLogin = await request('/api/v1/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD }),
     });
     expect(adminLogin.response.status).toBe(200);
-    scope.refreshTokenHashes.push(await hashSecret(adminLogin.body.data.refresh_token));
+    scope.trackRefreshToken(adminLogin.body.data.refresh_token);
     const adminHeaders = { Authorization: `Bearer ${adminLogin.body.data.access_token}`, 'Content-Type': 'application/json' };
     const invalidScope = await request('/api/v1/auth/api-keys', {
       method: 'POST', headers: adminHeaders,
@@ -122,7 +115,7 @@ integrationTest('API key scope and workspace membership are enforced independent
       method: 'POST', headers: adminHeaders,
       body: JSON.stringify({ name: 'Independent read-only key', scopes: ['records:read'] }),
     });
-    if (created.body.data?.id) scope.apiKeyIds.push(created.body.data.id);
+    if (created.body.data?.id) scope.trackApiKey(created.body.data.id);
     expect(created.response.status).toBe(201);
     const keyHeaders = { Authorization: `Bearer ${created.body.data.key}`, 'Content-Type': 'application/json' };
     expect((await request('/api/v1/records', { headers: keyHeaders })).response.status).toBe(200);
@@ -135,15 +128,49 @@ integrationTest('API key scope and workspace membership are enforced independent
     for (const path of forbiddenPaths) expect((await request(path, { headers: keyHeaders })).response.status).toBe(403);
     expect((await request('/api/v1/audit-logs', { headers: keyHeaders })).response.status).toBe(401);
     expect((await request('/api/v1/auth/api-keys', { headers: keyHeaders })).response.status).toBe(401);
+    const revoked = await request(`/api/v1/auth/api-keys/${created.body.data.id}`, {
+      method: 'DELETE', headers: adminHeaders,
+    });
+    expect(revoked.response.status).toBe(200);
+    expect((await request('/api/v1/records', { headers: keyHeaders })).response.status).toBe(401);
+  } finally {
+    await scope.cleanup();
+  }
+});
+
+integrationTest('only one concurrent refresh can rotate a token', async () => {
+  const scope = authFixture();
+  try {
+    const login = await request('/api/v1/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD }),
+    });
+    expect(login.response.status).toBe(200);
+    scope.trackRefreshToken(login.body.data.refresh_token);
+    const options = {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: login.body.data.refresh_token }),
+    };
+    const rotations = await Promise.all([
+      request('/api/v1/auth/refresh', options),
+      request('/api/v1/auth/refresh', options),
+    ]);
+    for (const result of rotations) {
+      if (result.body.data?.refresh_token) scope.trackRefreshToken(result.body.data.refresh_token);
+    }
+    expect(rotations.map(({ response }) => response.status).sort()).toEqual([200, 401]);
+    const replay = await request('/api/v1/auth/refresh', options);
+    expect(replay.response.status).toBe(401);
+    expect(replay.body.error.code).toBe('INVALID_REFRESH_TOKEN');
   } finally {
     await scope.cleanup();
   }
 });
 
 integrationTest('login rate limiting clears its own Redis state after failure', async () => {
-  const scope = fixture();
+  const scope = authFixture();
   const email = `rate-limit-${crypto.randomUUID()}@example.com`;
-  scope.rateLimitEmails.push(email);
+  scope.trackRateLimitEmail(email);
   try {
     const { maxAttempts } = getLoginRateLimitConfig();
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
