@@ -170,7 +170,8 @@ docker compose exec api bun run db:migrate
 - [Done] Asset API・upload authorization・provenance binding
 - [Done] Record参照とworkspace境界、承認／revision整合性の修復
 - [Done] Worker lease／heartbeat／claim世代、上限付きretry、定期reaper、Redis停止時polling
-- [Next] Asset確定・参照保持、DB＋object backup／restore試験
+- [Done] Asset一時uploadと確定keyの分離、後着PUTからのready原本保護
+- [Next] Asset参照保持・孤立object回収、DB＋object backup／restore試験
 - [Later] Asset processing jobs・media metadata extraction・derived-Asset provenance
 
 ## 将来のMemory Schema

@@ -1088,9 +1088,10 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   expect(assetReservation.body.data.bindings).toHaveLength(3);
   expect(assetReservation.body.meta.duplicate_asset_ids).toHaveLength(0);
   createdAssetIds.push(assetReservation.body.data.id);
-  const [assetStorage] = await db.select({ objectKey: assets.objectKey }).from(assets)
+  const [assetStorage] = await db.select({ objectKey: assets.objectKey, stagingObjectKey: assets.stagingObjectKey }).from(assets)
     .where(eq(assets.id, assetReservation.body.data.id));
-  createdObjectKeys.push(assetStorage.objectKey);
+  expect(assetStorage.stagingObjectKey).not.toBe(assetStorage.objectKey);
+  createdObjectKeys.push(assetStorage.objectKey, assetStorage.stagingObjectKey);
 
   const assetUpload = await fetch(assetReservation.body.data.upload_url, {
     method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: assetBytes,
@@ -1115,6 +1116,12 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   expect(assetDownload.response.status).toBe(200);
   const downloadedAsset = new Uint8Array(await (await fetch(assetDownload.body.data.download_url)).arrayBuffer());
   expect(downloadedAsset).toEqual(assetBytes);
+  const overwrittenStaging = await fetch(assetReservation.body.data.upload_url, {
+    method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: new TextEncoder().encode('tampered-after-completion'),
+  });
+  expect(overwrittenStaging.ok).toBe(true);
+  const downloadedAfterLatePut = new Uint8Array(await (await fetch(assetDownload.body.data.download_url)).arrayBuffer());
+  expect(downloadedAfterLatePut).toEqual(assetBytes);
 
   const duplicateAssetReservation = await request('/api/v1/assets/upload-url', {
     method: 'POST', headers,
@@ -1140,15 +1147,21 @@ integrationTest('validates auth, provenance, review, audit, import/export, datas
   });
   expect(mismatchedReservation.response.status).toBe(201);
   createdAssetIds.push(mismatchedReservation.body.data.id);
-  const [mismatchStorage] = await db.select({ objectKey: assets.objectKey }).from(assets)
+  const [mismatchStorage] = await db.select({ objectKey: assets.objectKey, stagingObjectKey: assets.stagingObjectKey }).from(assets)
     .where(eq(assets.id, mismatchedReservation.body.data.id));
-  createdObjectKeys.push(mismatchStorage.objectKey);
+  createdObjectKeys.push(mismatchStorage.objectKey, mismatchStorage.stagingObjectKey);
   expect((await fetch(mismatchedReservation.body.data.upload_url, { method: 'PUT', body: wrongBytes })).ok).toBe(true);
   const mismatchedComplete = await request(`/api/v1/assets/${mismatchedReservation.body.data.id}/complete`, {
     method: 'POST', headers, body: JSON.stringify({}),
   });
   expect(mismatchedComplete.response.status).toBe(422);
   expect(mismatchedComplete.body.error.code).toBe('ASSET_HASH_MISMATCH');
+  expect((await fetch(mismatchedReservation.body.data.upload_url, { method: 'PUT', body: assetBytes })).ok).toBe(true);
+  const correctedComplete = await request(`/api/v1/assets/${mismatchedReservation.body.data.id}/complete`, {
+    method: 'POST', headers, body: JSON.stringify({}),
+  });
+  expect(correctedComplete.response.status).toBe(200);
+  expect(correctedComplete.body.data.status).toBe('ready');
 
   const assetDeleted = await request(`/api/v1/assets/${assetReservation.body.data.id}`, { method: 'DELETE', headers });
   expect(assetDeleted.response.status).toBe(200);

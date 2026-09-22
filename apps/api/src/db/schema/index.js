@@ -165,6 +165,7 @@ export const assets = datasetSchema.table('assets', {
   id: uuid('id').defaultRandom().primaryKey(),
   bucketName: text('bucket_name').notNull(),
   objectKey: text('object_key').notNull().unique(),
+  stagingObjectKey: text('staging_object_key').unique(),
   originalFilename: text('original_filename').notNull(),
   mimeType: text('mime_type').notNull(),
   sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),

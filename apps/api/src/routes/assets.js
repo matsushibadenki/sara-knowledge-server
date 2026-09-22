@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { requireAuth, requireRoles, requireScopes } from '../auth/middleware.js';
 import { db } from '../db/client.js';
 import { assetBindings, assets } from '../db/schema/index.js';
-import { deleteObject, hashObject, presignObject, statObject } from '../services/background-jobs.js';
+import { deleteObject, hashBytes, presignObject, readObjectBytes, statObject, storeObject } from '../services/background-jobs.js';
 import { findAccessibleResource } from '../services/resource-access.js';
 
 const uuidSchema = z.string().uuid();
@@ -77,11 +77,12 @@ assetRoutes.post('/upload-url', requireScopes('assets:write'), requireRoles('adm
     eq(assets.sha256, input.data.sha256), eq(assets.status, 'ready'), isNull(assets.deletedAt),
   )).limit(20);
   const id = crypto.randomUUID();
-  const objectKey = `assets/${c.get('workspace').workspaceId}/${id}/original`;
+  const objectKey = `assets/${c.get('workspace').workspaceId}/${id}/original.final`;
+  const stagingObjectKey = `assets/${c.get('workspace').workspaceId}/${id}/original.upload`;
   const bucketName = process.env.MINIO_BUCKET || 'sara-assets';
   const { asset, bindings } = await db.transaction(async (tx) => {
     const [created] = await tx.insert(assets).values({
-      id, bucketName, objectKey, originalFilename: input.data.original_filename,
+      id, bucketName, objectKey, stagingObjectKey, originalFilename: input.data.original_filename,
       mimeType: input.data.mime_type.toLowerCase(), sizeBytes: input.data.size_bytes,
       sha256: input.data.sha256, width: input.data.width ?? null, height: input.data.height ?? null,
       durationMs: input.data.duration_ms ?? null, metadata: input.data.metadata, createdBy: ownerId,
@@ -92,7 +93,7 @@ assetRoutes.post('/upload-url', requireScopes('assets:write'), requireRoles('adm
     }))).returning();
     return { asset: created, bindings: createdBindings };
   });
-  const uploadUrl = presignObject(objectKey, 'PUT', 300, { type: asset.mimeType });
+  const uploadUrl = presignObject(stagingObjectKey, 'PUT', 300, { type: asset.mimeType });
   return c.json({
     data: { ...serializeAsset(asset, bindings), upload_url: uploadUrl, expires_in: 300 },
     meta: { duplicate_asset_ids: duplicateCandidates.map((candidate) => candidate.id) }, error: null,
@@ -106,16 +107,27 @@ assetRoutes.post('/:id/complete', requireScopes('assets:write'), requireRoles('a
   const owned = await activeAssetWithBindings(id.data);
   if (!owned) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Asset was not found.');
   if (owned.asset.status === 'ready') return c.json({ data: serializeAsset(owned.asset, owned.bindings), meta: { replayed: true }, error: null });
+  if (!owned.asset.stagingObjectKey) return errorResponse(c, 409, 'ASSET_STATE_CONFLICT', 'Asset staging key is missing.');
   let stat;
-  try { stat = await statObject(owned.asset.objectKey); } catch { return errorResponse(c, 409, 'ASSET_NOT_UPLOADED', 'The uploaded object was not found.'); }
+  try { stat = await statObject(owned.asset.stagingObjectKey); } catch { return errorResponse(c, 409, 'ASSET_NOT_UPLOADED', 'The uploaded object was not found.'); }
   if (Number(stat.size) !== owned.asset.sizeBytes) return errorResponse(c, 422, 'ASSET_SIZE_MISMATCH', 'Uploaded object size does not match the reservation.');
-  if (await hashObject(owned.asset.objectKey) !== owned.asset.sha256) return errorResponse(c, 422, 'ASSET_HASH_MISMATCH', 'Uploaded object SHA-256 does not match the reservation.');
+  let bytes;
+  try { bytes = await readObjectBytes(owned.asset.stagingObjectKey); } catch { return errorResponse(c, 409, 'ASSET_NOT_UPLOADED', 'The uploaded object was not found.'); }
+  if (bytes.byteLength !== owned.asset.sizeBytes) return errorResponse(c, 422, 'ASSET_SIZE_MISMATCH', 'Uploaded object size does not match the reservation.');
+  if (await hashBytes(bytes) !== owned.asset.sha256) return errorResponse(c, 422, 'ASSET_HASH_MISMATCH', 'Uploaded object SHA-256 does not match the reservation.');
+  try { await storeObject(owned.asset.objectKey, bytes, owned.asset.mimeType); } catch (error) {
+    console.error(JSON.stringify({ level: 'error', service: 'api', message: 'Asset finalization write failed', asset_id: owned.asset.id, error: error.message }));
+    return errorResponse(c, 503, 'ASSET_FINALIZATION_FAILED', 'Asset could not be finalized; retry completion.');
+  }
   const [ready] = await db.update(assets).set({ status: 'ready', updatedAt: new Date() }).where(and(
     eq(assets.id, owned.asset.id), eq(assets.status, 'pending'), isNull(assets.deletedAt),
   )).returning();
   if (!ready) {
     const current = await activeAssetWithBindings(id.data);
     return current?.asset.status === 'ready' ? c.json({ data: serializeAsset(current.asset, current.bindings), meta: { replayed: true }, error: null }) : errorResponse(c, 409, 'ASSET_STATE_CONFLICT', 'Asset state changed concurrently.');
+  }
+  try { await deleteObject(owned.asset.stagingObjectKey); } catch (error) {
+    console.error(JSON.stringify({ level: 'warn', service: 'api', message: 'Asset finalized but staging cleanup failed', asset_id: owned.asset.id, error: error.message }));
   }
   return c.json({ data: serializeAsset(ready, owned.bindings), meta: { replayed: false }, error: null });
 });
@@ -154,6 +166,11 @@ assetRoutes.delete('/:id', requireScopes('assets:write'), requireRoles('admin', 
   if (!deleted) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Asset was not found.');
   try { await deleteObject(deleted.objectKey); } catch (error) {
     console.error(JSON.stringify({ level: 'warn', service: 'api', message: 'Asset metadata deleted but object cleanup failed', asset_id: deleted.id, error: error.message }));
+  }
+  if (deleted.stagingObjectKey) {
+    try { await deleteObject(deleted.stagingObjectKey); } catch (error) {
+      console.error(JSON.stringify({ level: 'warn', service: 'api', message: 'Asset staging cleanup failed', asset_id: deleted.id, error: error.message }));
+    }
   }
   return c.json({ data: serializeAsset(deleted), meta: {}, error: null });
 });

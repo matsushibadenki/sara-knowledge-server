@@ -38,8 +38,11 @@ export async function statObject(key) {
   return s3Client().stat(key);
 }
 
-export async function hashObject(key) {
-  const bytes = new Uint8Array(await s3Client().file(key).arrayBuffer());
+export async function readObjectBytes(key) {
+  return new Uint8Array(await s3Client().file(key).arrayBuffer());
+}
+
+export async function hashBytes(bytes) {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }

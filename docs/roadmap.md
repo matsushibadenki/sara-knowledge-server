@@ -1,6 +1,6 @@
 # Roadmap
 
-更新: 2026-09-12。[設計評価と方針](database-direction-review-2026-09-05.md)に基づく。進捗と実装順序の正本は本書。過去のprogress文書と[改訂前の全項目](roadmap-archive-2026-09-05.md)は履歴であり、そこにあるNextは現在の着手指示ではない。
+更新: 2026-09-22。[設計評価と方針](database-direction-review-2026-09-05.md)に基づく。進捗と実装順序の正本は本書。過去のprogress文書と[改訂前の全項目](roadmap-archive-2026-09-05.md)は履歴であり、そこにあるNextは現在の着手指示ではない。
 
 - `[Done]` implemented in the current codebase
 - `[Next]` high-priority unfinished work
@@ -40,11 +40,11 @@ English: Prove a revision-aware knowledge database with traceable evidence and c
 - [Done] **G0.3a 共有契約とCI:** Event入力schema／DB変換、Import解析／正規化をAPIとWorkerで共有。空DBへの全migration、共有契約テスト、実Worker統合試験を同一CI jobへ追加。
 - [Next] **G0.3b 試験分割:** 巨大な統合ケースを認証、Record／Review、Import／Export、Dataset／Training、Memory／Assetへ分け、共通fixtureの失敗時cleanupを保証する。
 - [Done] **G0.4 ジョブ復旧:** lease／heartbeat／claim世代、世代条件付き確定、定期reaper、retry上限を導入。Redis通知が停止してもtimeout付きでDB pollingを継続し、round-robin claimでJob種別の飢餓を防止。専用Docker試験で回帰確認。
-- [Next] **G0.5 Asset確定と保全:** 一時uploadと確定版を分離。参照保持、再試行可能な削除Job、孤立object照合、DB＋object backup／restore手順を追加する。
+- [Next] **G0.5 Asset確定と保全:** 一時uploadと確定版の分離、後着PUTによるready原本の変更防止は実装済み。参照保持、再試行可能な削除Job、孤立object照合、DB＋object backup／restore手順が残る。
 
 残る順序はG0.3b → G0.5。G0.4は先行して完了した。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
 
-**完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。Jobのlease切れ、旧claim、Redis停止、retry上限と公平性は確認済み。長時間処理の途中kill、Asset再PUT・object削除失敗、別環境へのDB＋object復元を追加確認し、参照とhashを一致させる。
+**完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。Jobのlease切れ、旧claim、Redis停止、retry上限と公平性、およびAsset確定後の旧PUT URL再利用による原本不変性は確認済み。長時間処理の途中kill、object削除失敗、別環境へのDB＋object復元を追加確認し、参照とhashを一致させる。
 
 ## G1 — 訂正できる知識モデル（G0完了後）
 
