@@ -39,7 +39,7 @@ English: Prove a revision-aware knowledge database with traceable evidence and c
 - 🟢 [Done] **G0.2a Record承認整合性:** 一般POST／PATCH／同期Import／Workerからworkflow状態を直接確定できないようにし、すべてdraftとして作成。承認済みRecordの新Versionをdraftへ戻し、Reviewを旧Versionへ固定。
 - 🟢 [Done] **G0.2b Memory revision:** Memoryの更新、Relation Evidence追加、Verificationにrevision競合制御を追加。承認済み／却下済み内容の編集をcandidateへ戻し、Decisionに対象revisionと内容snapshotを固定。migration前backupからの復元・再migrationも確認。
 - 🟢 [Done] **G0.3a 共有契約とCI:** Event入力schema／DB変換、Import解析／正規化をAPIとWorkerで共有。空DBへの全migration、共有契約テスト、実Worker統合試験を同一CI jobへ追加。
-- 🟠 [Next] **G0.3b 試験分割:** 認証・権限・ログイン制限・Refresh競合・APIキー失効、Asset upload／確定／後着PUT、Dataset Snapshot／Training Runを独立した統合テストへ移した。共通のLIFO cleanup fixtureを導入し、別ユーザーによるRecord承認・版固定・承認後draft化も独立テストで確認した。巨大な統合ケースに残るRecord／Review依存と、Import／Export、Memoryをさらに分ける。
+- 🟠 [Next] **G0.3b 試験分割:** 認証・権限・ログイン制限・Refresh競合・APIキー失効、Asset upload／確定／後着PUT、Dataset Snapshot／Training Runを独立した統合テストへ移した。共通のLIFO cleanup fixtureを導入し、別ユーザーによるRecord承認・版固定・承認後draft化も独立テストで確認した。巨大な統合ケースに残るRecord／Review依存と、Memoryをさらに分ける。Import／Exportは同期とWorkerの独立ケースへ分割し、失敗時のジョブ停止・生成データ回収と、成功Recordのdraft維持も検証する。[検証記録](import-export-isolation-progress-2026-10-11.md)。
 
 English: Authentication, refresh rotation, Asset finalization, Dataset snapshots, Training Runs, and a separate-reviewer Record workflow now have independent integration coverage with failure-safe fixture cleanup. Remaining domains still need separation.
 
