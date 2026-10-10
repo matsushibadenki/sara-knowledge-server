@@ -17,7 +17,7 @@ async function request(path, options = {}) {
   return { response, body: await response.json() };
 }
 
-integrationTest('Snapshot membership and Training Run model version stay fixed after source edits', async () => {
+integrationTest('Snapshot membership and Training Run model version stay fixed after Record and model edits', async () => {
   const scope = createIntegrationFixture();
   try {
     const login = await request('/api/v1/auth/login', {

@@ -6,9 +6,6 @@ import {
   apiKeys,
   annotations,
   auditLogs,
-  datasetDefinitions,
-  datasetSnapshotRecords,
-  datasetSnapshots,
   evaluations,
   exportJobs,
   importItems,
@@ -30,9 +27,6 @@ import {
   refreshTokens,
   sources,
   tags,
-  trainingMetrics,
-  trainingModels,
-  trainingRuns,
   users,
   workspaceMemberships,
 } from '../src/db/schema/index.js';
@@ -55,10 +49,6 @@ const createdTagIds = [];
 const createdImportJobIds = [];
 const createdExportJobIds = [];
 const createdObjectKeys = [];
-const createdDatasetDefinitionIds = [];
-const createdDatasetSnapshotIds = [];
-const createdTrainingModelIds = [];
-const createdTrainingRunIds = [];
 const createdMemoryConceptIds = [];
 const createdMemoryEntityIds = [];
 const createdMemoryEventIds = [];
@@ -139,20 +129,6 @@ afterAll(async () => {
   if (createdMemoryExperienceIds.length > 0) {
     await db.delete(memoryExperiences).where(inArray(memoryExperiences.id, createdMemoryExperienceIds));
   }
-  if (createdTrainingRunIds.length > 0) {
-    await db.delete(trainingMetrics).where(inArray(trainingMetrics.runId, createdTrainingRunIds));
-    await db.delete(trainingRuns).where(inArray(trainingRuns.id, createdTrainingRunIds));
-  }
-  if (createdTrainingModelIds.length > 0) {
-    await db.delete(trainingModels).where(inArray(trainingModels.id, createdTrainingModelIds));
-  }
-  if (createdDatasetSnapshotIds.length > 0) {
-    await db.delete(datasetSnapshotRecords).where(inArray(datasetSnapshotRecords.snapshotId, createdDatasetSnapshotIds));
-    await db.delete(datasetSnapshots).where(inArray(datasetSnapshots.id, createdDatasetSnapshotIds));
-  }
-  if (createdDatasetDefinitionIds.length > 0) {
-    await db.delete(datasetDefinitions).where(inArray(datasetDefinitions.id, createdDatasetDefinitionIds));
-  }
   if (createdObjectKeys.length > 0) {
     const objectStore = new Bun.S3Client({
       endpoint: `${process.env.MINIO_USE_SSL === 'true' ? 'https' : 'http'}://${process.env.MINIO_ENDPOINT}:${process.env.MINIO_PORT}`,
@@ -193,7 +169,7 @@ afterAll(async () => {
   }
 });
 
-integrationTest('validates provenance, review, audit, import/export, datasets, training, memory, and concurrency', async () => {
+integrationTest('validates provenance, review, audit, import/export, memory, and concurrency', async () => {
   const login = await request('/api/v1/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
