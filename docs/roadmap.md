@@ -39,17 +39,23 @@ English: Prove a revision-aware knowledge database with traceable evidence and c
 - 🟢 [Done] **G0.2a Record承認整合性:** 一般POST／PATCH／同期Import／Workerからworkflow状態を直接確定できないようにし、すべてdraftとして作成。承認済みRecordの新Versionをdraftへ戻し、Reviewを旧Versionへ固定。
 - 🟢 [Done] **G0.2b Memory revision:** Memoryの更新、Relation Evidence追加、Verificationにrevision競合制御を追加。承認済み／却下済み内容の編集をcandidateへ戻し、Decisionに対象revisionと内容snapshotを固定。migration前backupからの復元・再migrationも確認。
 - 🟢 [Done] **G0.3a 共有契約とCI:** Event入力schema／DB変換、Import解析／正規化をAPIとWorkerで共有。空DBへの全migration、共有契約テスト、実Worker統合試験を同一CI jobへ追加。
-- 🟠 [Next] **G0.3b 試験分割:** 認証・権限・ログイン制限・Refresh競合・APIキー失効、Asset upload／確定／後着PUT、Dataset Snapshot／Training Runを独立した統合テストへ移した。共通のLIFO cleanup fixtureを導入し、別ユーザーによるRecord承認・版固定・承認後draft化も独立テストで確認した。巨大な統合ケースに残るRecord／Review依存と、Memoryをさらに分ける。Import／Exportは同期とWorkerの独立ケースへ分割し、失敗時のジョブ停止・生成データ回収と、成功Recordのdraft維持も検証する。[検証記録](import-export-isolation-progress-2026-10-11.md)。
+- 🟢 [Done] **G0.3b 試験分割:** 認証、Record出典・タグ・監査、品質Review、別ユーザーの版固定承認、Import／Export、Memory同期・署名取り込み、Worker取り込み、グラフ・Evidence・Verification、Asset、Dataset／Trainingを独立ケースへ分割。巨大な統合ケースを撤去した。LIFO fixtureはassert前に返却IDを登録し、途中失敗したMemory Jobの停止・子データ／object回収も検証する。[検証記録](asset-retention-and-test-isolation-progress-2026-10-11.md)。
 
-English: Authentication, refresh rotation, Asset finalization, Dataset snapshots, Training Runs, and a separate-reviewer Record workflow now have independent integration coverage with failure-safe fixture cleanup. Remaining domains still need separation.
+English: G0.3b is complete. Record provenance and quality Review, Memory synchronous/signed ingestion, Worker ingestion, graph/evidence/verification and the other domains have independent fixtures and cases. The monolithic integration case was removed; Memory cleanup after an injected failure is tested.
 
-简体中文：认证、刷新令牌轮换、Asset 确定、Dataset 快照、Training Run 以及跨用户 Record 审核已有独立集成测试，并加入失败时的资源清理；其余领域仍需拆分。
+简体中文：G0.3b已完成。Record来源与质量审核、Memory同步及签名导入、Worker导入、图谱／证据／验证等领域均有独立fixture和测试；已移除大型集成用例，并验证Memory中途失败后的清理。
+
 - 🟢 [Done] **G0.4 ジョブ復旧:** lease／heartbeat／claim世代、世代条件付き確定、定期reaper、retry上限を導入。Redis通知が停止してもtimeout付きでDB pollingを継続し、round-robin claimでJob種別の飢餓を防止。専用Docker試験で回帰確認。
-- 🟠 [Next] **G0.5 Asset確定と保全:** 一時uploadと確定版の分離、後着PUTによるready原本の変更防止は実装済み。参照保持、再試行可能な削除Job、孤立object照合、DB＋object backup／restore手順が残る。
+- 🟢 [Done] **G0.5a Asset保持・削除retry:** 一時upload／確定版の分離に加え、参照中Assetを保持。明示的なbinding解除後の論理削除と永続削除Jobを同一transactionで確定し、原本を既定24時間保持。一時uploadは署名URL失効＋猶予後に回収。WorkerがDB polling、retry上限、lease復旧、claim世代の排除で削除を行う。Job閲覧・管理者retry APIを追加し、ストレージ障害・旧claim・参照保護を検証。[検証記録](asset-retention-and-test-isolation-progress-2026-10-11.md)。
+- 🟠 [Next] **G0.5b Asset照合・復元:** 孤立object照合、期限後に到着した長時間uploadの再照合、DB＋object backup／restore手順を実装・検証する。
 
-残る順序はG0.3b → G0.5。G0.4は先行して完了した。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
+English: Referenced Assets are retained, including references to soft-deleted targets. After explicit detachment, logical deletion and durable jobs commit together; originals remain for 24 hours by default. Staging cleanup waits for signed-URL expiry plus grace. PostgreSQL polling, fenced claims, retries and lease recovery are verified. Orphan reconciliation and coordinated DB/object restore remain next.
 
-**完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。Jobのlease切れ、旧claim、Redis停止、retry上限と公平性、およびAsset確定後の旧PUT URL再利用による原本不変性は確認済み。長時間処理の途中kill、object削除失敗、別環境へのDB＋object復元を追加確認し、参照とhashを一致させる。
+简体中文：保留被引用的Asset，包括已软删除目标的引用。显式解除绑定后，逻辑删除和持久任务在同一事务提交；原本默认保留24小时。临时上传在签名URL过期并经过宽限期后清理。已验证DB轮询、claim世代、重试及lease恢复；孤立对象核对和DB／对象协同恢复仍为下一步。
+
+残る順序はG0.5b → G1。G0.3b、G0.4、G0.5aは完了した。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
+
+**完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。Jobのlease切れ、旧claim、Redis停止、retry上限と公平性、およびAsset確定後の旧PUT URL再利用による原本不変性は確認済み。object削除失敗からのretryとlease切れの復旧も確認済み。長時間処理の途中kill、別環境へのDB＋object復元を追加確認し、参照とhashを一致させる。
 
 ## G1 — 訂正できる知識モデル（G0完了後）
 

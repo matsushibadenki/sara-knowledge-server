@@ -149,6 +149,12 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - MinIO: 画像・音声・動画などのバイナリアセット
 - Mailpit: 開発用メール確認
 
+Assetの保持・回収：参照を明示解除してから論理削除し、原本を既定24時間保持した後、永続Jobで回収します。失敗時はWorkerが再試行し、上限到達後は管理者が再開できます。[設計・API・検証記録](docs/asset-retention-and-test-isolation-progress-2026-10-11.md)。
+
+English: Detach Asset bindings before deletion. Originals are retained for 24 hours by default, then durable Worker jobs delete them with bounded retries and admin restart after exhaustion.
+
+简体中文：删除前显式解除Asset绑定。原本默认保留24小时，再由持久Worker任务删除；失败有限重试，耗尽后可由管理员重启。
+
 ## 現在の実装状況
 
 凡例:
@@ -187,7 +193,8 @@ AI-data-manager / Next.js / SARA / 外部サービス
 - [Done] Asset API・upload authorization・provenance binding
 - [Done] Record参照・workspace権限・承認とrevisionの整合性修復
 - [Done] 共有domain contract、CI統合試験、Worker lease／heartbeat／claim世代／再実行
-- [Next] CI統合試験の責務別分割、Asset確定／参照保持、DB＋object復元保証
+- 🟢 [Done] CI統合試験の責務別分割、Asset確定／参照保持／永続削除Job・retry
+- 🟠 [Next] 孤立object照合、DB＋object復元保証
 
 ### 将来設計
 
@@ -350,6 +357,9 @@ GET    /assets/:id
 POST   /assets/:id/complete
 GET    /assets/:id/download-url
 DELETE /assets/:id
+DELETE /assets/:id/bindings/:bindingId
+GET    /assets/:id/deletion-jobs
+POST   /assets/:id/deletion-jobs/:jobId/retry
 
 GET    /memory/experiences
 POST   /memory/experiences

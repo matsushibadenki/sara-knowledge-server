@@ -1,5 +1,6 @@
 // /apps/worker/src/index.js
 import postgres from 'postgres';
+import { createAssetDeletionQueue } from './asset-deletion.js';
 import { memoryEventAsyncSchema, memoryEventValues } from '@sara-knowledge/domain-contracts/memory-events';
 import { normalizeImportedRecord, parseImportContent } from '@sara-knowledge/domain-contracts/record-import';
 
@@ -13,15 +14,21 @@ const reaperSeconds = Math.max(2, Number(process.env.JOB_REAPER_INTERVAL_SECONDS
 const retryDelaySeconds = Math.max(0, Number(process.env.JOB_RETRY_DELAY_SECONDS || 5));
 const redisTimeoutMs = Math.max(50, Number(process.env.JOB_REDIS_TIMEOUT_MS || 500));
 const runOnce = process.env.WORKER_RUN_ONCE === 'true';
-const s3 = new Bun.S3Client({
+const s3Config = {
   endpoint: `${process.env.MINIO_USE_SSL === 'true' ? 'https' : 'http'}://${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || '9000'}`,
   accessKeyId: process.env.MINIO_ACCESS_KEY || 'sara_minio',
   secretAccessKey: process.env.MINIO_SECRET_KEY || 'change_me',
   bucket: process.env.MINIO_BUCKET || 'sara-assets',
   region: 'us-east-1',
+};
+const s3 = new Bun.S3Client(s3Config);
+const assetDeletionQueue = createAssetDeletionQueue({
+  sql, workerId, leaseSeconds, retryDelaySeconds,
+  deleteObject: (key, bucket) => new Bun.S3Client({ ...s3Config, bucket }).delete(key),
 });
 
 async function heartbeatJob(type, job) {
+  if (type === 'asset-deletion') return assetDeletionQueue.heartbeat(job);
   if (type === 'import') return sql`UPDATE dataset.import_jobs SET heartbeat_at=now(), lease_expires_at=now() + ${leaseSeconds} * interval '1 second' WHERE id=${job.id} AND status='processing' AND worker_id=${workerId} AND claim_generation=${job.claim_generation} RETURNING id`;
   if (type === 'export') return sql`UPDATE dataset.export_jobs SET heartbeat_at=now(), lease_expires_at=now() + ${leaseSeconds} * interval '1 second' WHERE id=${job.id} AND status='processing' AND worker_id=${workerId} AND claim_generation=${job.claim_generation} RETURNING id`;
   return sql`UPDATE memory.event_ingestion_jobs SET heartbeat_at=now(), lease_expires_at=now() + ${leaseSeconds} * interval '1 second' WHERE id=${job.id} AND status='processing' AND worker_id=${workerId} AND claim_generation=${job.claim_generation} RETURNING id`;
@@ -220,6 +227,7 @@ async function processMemoryEvents(job) {
 
 async function reapJobs() {
   await Promise.all([
+    assetDeletionQueue.reap(),
     sql`UPDATE dataset.import_jobs SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END, completed_at=now(), error_message=CASE WHEN cancel_requested THEN error_message ELSE COALESCE(error_message,'Maximum job attempts exhausted.') END WHERE mode='async' AND status='queued' AND (cancel_requested OR attempt_count >= max_attempts)`,
     sql`UPDATE dataset.export_jobs SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END, completed_at=now(), error_message=CASE WHEN cancel_requested THEN error_message ELSE COALESCE(error_message,'Maximum job attempts exhausted.') END WHERE mode='async' AND status='queued' AND (cancel_requested OR attempt_count >= max_attempts)`,
     sql`UPDATE memory.event_ingestion_jobs SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END, completed_at=now(), error_message=CASE WHEN cancel_requested THEN error_message ELSE COALESCE(error_message,'Maximum job attempts exhausted.') END WHERE status='queued' AND (cancel_requested OR attempt_count >= max_attempts)`,
@@ -230,6 +238,7 @@ async function reapJobs() {
 }
 
 const jobQueues = [
+  assetDeletionQueue,
   { type: 'import', claim: claimImport, process: processImport },
   { type: 'export', claim: claimExport, process: processExport },
   { type: 'memory-events', claim: claimMemoryEvents, process: processMemoryEvents },

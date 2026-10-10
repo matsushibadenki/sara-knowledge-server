@@ -3,8 +3,9 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireAuth, requireRoles, requireScopes } from '../auth/middleware.js';
 import { db } from '../db/client.js';
-import { assetBindings, assets } from '../db/schema/index.js';
-import { deleteObject, hashBytes, presignObject, readObjectBytes, statObject, storeObject } from '../services/background-jobs.js';
+import { assetBindings, assetDeletionJobs, assets } from '../db/schema/index.js';
+import { hashBytes, presignObject, readObjectBytes, statObject, storeObject } from '../services/background-jobs.js';
+import { ASSET_URL_SECONDS, scheduleAssetDeletion, serializeDeletionJob } from '../services/asset-retention.js';
 import { findAccessibleResource } from '../services/resource-access.js';
 
 const uuidSchema = z.string().uuid();
@@ -93,9 +94,9 @@ assetRoutes.post('/upload-url', requireScopes('assets:write'), requireRoles('adm
     }))).returning();
     return { asset: created, bindings: createdBindings };
   });
-  const uploadUrl = presignObject(stagingObjectKey, 'PUT', 300, { type: asset.mimeType });
+  const uploadUrl = presignObject(stagingObjectKey, 'PUT', ASSET_URL_SECONDS, { type: asset.mimeType });
   return c.json({
-    data: { ...serializeAsset(asset, bindings), upload_url: uploadUrl, expires_in: 300 },
+    data: { ...serializeAsset(asset, bindings), upload_url: uploadUrl, expires_in: ASSET_URL_SECONDS },
     meta: { duplicate_asset_ids: duplicateCandidates.map((candidate) => candidate.id) }, error: null,
   }, 201);
 });
@@ -115,21 +116,25 @@ assetRoutes.post('/:id/complete', requireScopes('assets:write'), requireRoles('a
   try { bytes = await readObjectBytes(owned.asset.stagingObjectKey); } catch { return errorResponse(c, 409, 'ASSET_NOT_UPLOADED', 'The uploaded object was not found.'); }
   if (bytes.byteLength !== owned.asset.sizeBytes) return errorResponse(c, 422, 'ASSET_SIZE_MISMATCH', 'Uploaded object size does not match the reservation.');
   if (await hashBytes(bytes) !== owned.asset.sha256) return errorResponse(c, 422, 'ASSET_HASH_MISMATCH', 'Uploaded object SHA-256 does not match the reservation.');
-  try { await storeObject(owned.asset.objectKey, bytes, owned.asset.mimeType); } catch (error) {
-    console.error(JSON.stringify({ level: 'error', service: 'api', message: 'Asset finalization write failed', asset_id: owned.asset.id, error: error.message }));
+  let finalized;
+  try {
+    finalized = await db.transaction(async (tx) => {
+      const [current] = await tx.select().from(assets).where(eq(assets.id, id.data)).for('update');
+      if (!current || current.deletedAt) return null;
+      if (current.status === 'ready') return { asset: current, replayed: true };
+      // The Asset lock serializes final object writes, deletion and binding detachment.
+      await storeObject(current.objectKey, bytes, current.mimeType);
+      const [ready] = await tx.update(assets).set({ status: 'ready', updatedAt: new Date() })
+        .where(eq(assets.id, current.id)).returning();
+      await scheduleAssetDeletion(tx, ready, 'staging');
+      return { asset: ready, replayed: false };
+    });
+  } catch (error) {
+    console.error(JSON.stringify({ level: 'error', service: 'api', message: 'Asset finalization failed', asset_id: owned.asset.id, error: error.message }));
     return errorResponse(c, 503, 'ASSET_FINALIZATION_FAILED', 'Asset could not be finalized; retry completion.');
   }
-  const [ready] = await db.update(assets).set({ status: 'ready', updatedAt: new Date() }).where(and(
-    eq(assets.id, owned.asset.id), eq(assets.status, 'pending'), isNull(assets.deletedAt),
-  )).returning();
-  if (!ready) {
-    const current = await activeAssetWithBindings(id.data);
-    return current?.asset.status === 'ready' ? c.json({ data: serializeAsset(current.asset, current.bindings), meta: { replayed: true }, error: null }) : errorResponse(c, 409, 'ASSET_STATE_CONFLICT', 'Asset state changed concurrently.');
-  }
-  try { await deleteObject(owned.asset.stagingObjectKey); } catch (error) {
-    console.error(JSON.stringify({ level: 'warn', service: 'api', message: 'Asset finalized but staging cleanup failed', asset_id: owned.asset.id, error: error.message }));
-  }
-  return c.json({ data: serializeAsset(ready, owned.bindings), meta: { replayed: false }, error: null });
+  if (!finalized) return errorResponse(c, 409, 'ASSET_STATE_CONFLICT', 'Asset state changed concurrently.');
+  return c.json({ data: serializeAsset(finalized.asset, owned.bindings), meta: { replayed: finalized.replayed }, error: null });
 });
 
 assetRoutes.get('/', requireScopes('assets:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
@@ -150,29 +155,63 @@ assetRoutes.get('/:id/download-url', requireScopes('assets:read'), requireRoles(
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Asset ID must be a UUID.');
   const owned = await activeAssetWithBindings(id.data);
   if (!owned || owned.asset.status !== 'ready') return errorResponse(c, 404, 'READY_ASSET_NOT_FOUND', 'Ready Asset was not found.');
-  const url = presignObject(owned.asset.objectKey, 'GET', 300, {
+  const url = presignObject(owned.asset.objectKey, 'GET', ASSET_URL_SECONDS, {
     type: owned.asset.mimeType,
     contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(owned.asset.originalFilename)}`,
   });
-  return c.json({ data: { download_url: url, expires_in: 300 }, meta: {}, error: null });
+  return c.json({ data: { download_url: url, expires_in: ASSET_URL_SECONDS }, meta: {}, error: null });
+});
+
+assetRoutes.delete('/:id/bindings/:bindingId', requireScopes('assets:write'), requireRoles('admin', 'editor'), async (c) => {
+  const id = uuidSchema.safeParse(c.req.param('id'));
+  const bindingId = uuidSchema.safeParse(c.req.param('bindingId'));
+  if (!id.success || !bindingId.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Asset and binding IDs must be UUIDs.');
+  const result = await db.transaction(async (tx) => {
+    const [asset] = await tx.select().from(assets).where(eq(assets.id, id.data)).for('update');
+    if (!asset) return null;
+    const [binding] = await tx.delete(assetBindings).where(and(eq(assetBindings.id, bindingId.data), eq(assetBindings.assetId, id.data))).returning();
+    return binding;
+  });
+  return result ? c.json({ data: serializeBinding(result), meta: {}, error: null }) : errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Asset binding was not found.');
+});
+
+assetRoutes.get('/:id/deletion-jobs', requireScopes('assets:read'), requireRoles('admin', 'editor'), async (c) => {
+  const id = uuidSchema.safeParse(c.req.param('id'));
+  if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Asset ID must be a UUID.');
+  const [asset] = await db.select({ id: assets.id }).from(assets).where(eq(assets.id, id.data));
+  if (!asset) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Asset was not found.');
+  const jobs = await db.select().from(assetDeletionJobs).where(eq(assetDeletionJobs.assetId, id.data)).orderBy(assetDeletionJobs.createdAt);
+  return c.json({ data: jobs.map(serializeDeletionJob), meta: {}, error: null });
+});
+
+assetRoutes.post('/:id/deletion-jobs/:jobId/retry', requireScopes('assets:write'), requireRoles('admin'), async (c) => {
+  const id = uuidSchema.safeParse(c.req.param('id'));
+  const jobId = uuidSchema.safeParse(c.req.param('jobId'));
+  if (!id.success || !jobId.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Asset and job IDs must be UUIDs.');
+  const [job] = await db.update(assetDeletionJobs).set({
+    status: 'queued', attemptCount: 0, nextAttemptAt: new Date(), completedAt: null, errorMessage: null,
+  }).where(and(eq(assetDeletionJobs.id, jobId.data), eq(assetDeletionJobs.assetId, id.data), eq(assetDeletionJobs.status, 'failed'))).returning();
+  return job ? c.json({ data: serializeDeletionJob(job), meta: {}, error: null }) : errorResponse(c, 409, 'JOB_NOT_RETRYABLE', 'Only a failed Asset deletion job can be retried.');
 });
 
 assetRoutes.delete('/:id', requireScopes('assets:write'), requireRoles('admin', 'editor'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Asset ID must be a UUID.');
-  const [deleted] = await db.update(assets).set({ deletedAt: new Date(), updatedAt: new Date() }).where(and(
-    eq(assets.id, id.data), isNull(assets.deletedAt),
-  )).returning();
-  if (!deleted) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Asset was not found.');
-  try { await deleteObject(deleted.objectKey); } catch (error) {
-    console.error(JSON.stringify({ level: 'warn', service: 'api', message: 'Asset metadata deleted but object cleanup failed', asset_id: deleted.id, error: error.message }));
-  }
-  if (deleted.stagingObjectKey) {
-    try { await deleteObject(deleted.stagingObjectKey); } catch (error) {
-      console.error(JSON.stringify({ level: 'warn', service: 'api', message: 'Asset staging cleanup failed', asset_id: deleted.id, error: error.message }));
-    }
-  }
-  return c.json({ data: serializeAsset(deleted), meta: {}, error: null });
+  const result = await db.transaction(async (tx) => {
+    const [asset] = await tx.select().from(assets).where(eq(assets.id, id.data)).for('update');
+    if (!asset) return { missing: true };
+    if (asset.deletedAt) return { asset, replayed: true };
+    // Even soft-deleted targets keep their references for later restoration.
+    const bindings = await tx.select({ id: assetBindings.id }).from(assetBindings).where(eq(assetBindings.assetId, asset.id)).limit(1);
+    if (bindings.length) return { retained: true };
+    const now = new Date();
+    const [deleted] = await tx.update(assets).set({ deletedAt: now, updatedAt: now }).where(eq(assets.id, asset.id)).returning();
+    await scheduleAssetDeletion(tx, deleted, 'deleted_asset', now);
+    return { asset: deleted, replayed: false };
+  });
+  if (result.missing) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Asset was not found.');
+  if (result.retained) return errorResponse(c, 409, 'ASSET_IN_USE', 'Detach all Asset bindings before deletion; references are retained even for deleted targets.');
+  return c.json({ data: serializeAsset(result.asset), meta: { replayed: result.replayed, deletion_queued: true }, error: null });
 });
 
 export default assetRoutes;

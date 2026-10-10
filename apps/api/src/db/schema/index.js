@@ -205,6 +205,34 @@ export const assetBindings = datasetSchema.table('asset_bindings', {
   targetTypeCheck: check('asset_bindings_target_type_check', sql`${table.targetType} IN ('source', 'record', 'event')`),
 }));
 
+export const assetDeletionJobs = datasetSchema.table('asset_deletion_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  assetId: uuid('asset_id').notNull().references(() => assets.id),
+  objectKey: text('object_key').notNull().unique(),
+  bucketName: text('bucket_name').notNull(),
+  reason: text('reason').notNull(),
+  status: text('status').notNull().default('queued'),
+  notBefore: timestamp('not_before', { withTimezone: true }).notNull(),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(3),
+  claimGeneration: integer('claim_generation').notNull().default(0),
+  workerId: text('worker_id'),
+  heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, (table) => ({
+  assetIndex: index('asset_deletion_jobs_asset_idx').on(table.assetId),
+  queueIndex: index('asset_deletion_jobs_queue_idx').on(table.nextAttemptAt, table.createdAt).where(sql`${table.status} = 'queued'`),
+  leaseIndex: index('asset_deletion_jobs_lease_idx').on(table.leaseExpiresAt).where(sql`${table.status} = 'processing'`),
+  reasonCheck: check('asset_deletion_jobs_reason_check', sql`${table.reason} IN ('staging', 'deleted_asset')`),
+  statusCheck: check('asset_deletion_jobs_status_check', sql`${table.status} IN ('queued', 'processing', 'completed', 'failed')`),
+  attemptsCheck: check('asset_deletion_jobs_attempts_check', sql`${table.attemptCount} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 100 AND ${table.attemptCount} <= ${table.maxAttempts} AND ${table.claimGeneration} >= 0`),
+  leaseCheck: check('asset_deletion_jobs_lease_check', sql`(${table.status} = 'processing') = (${table.workerId} IS NOT NULL AND ${table.heartbeatAt} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`),
+}));
+
 export const records = datasetSchema.table('records', {
   id: uuid('id').defaultRandom().primaryKey(),
   recordType: text('record_type').notNull(),

@@ -9,6 +9,7 @@ COPY packages/domain-contracts/package.json ./packages/domain-contracts/package.
 RUN bun install --frozen-lockfile
 COPY apps/api/src ./apps/api/src
 COPY apps/api/tests ./apps/api/tests
+COPY apps/worker/src/asset-deletion.js ./apps/worker/src/asset-deletion.js
 COPY packages/domain-contracts/src ./packages/domain-contracts/src
 
 WORKDIR /app/apps/api

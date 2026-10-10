@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import app from '../src/app.js';
 import { db } from '../src/db/client.js';
 import {
-  assetBindings, assets, auditLogs, memoryEvents, recordVersions, records, refreshTokens, sources,
+  assetBindings, assetDeletionJobs, assets, auditLogs, memoryEvents, recordVersions, records, refreshTokens, sources,
 } from '../src/db/schema/index.js';
 import { hashSecret } from '../src/auth/secrets.js';
 import { deleteObject } from '../src/services/background-jobs.js';
@@ -113,6 +113,7 @@ integrationTest('Asset finalization verifies bytes and ignores late writes to th
           for (const key of [stored?.final, stored?.staging].filter(Boolean)) {
             try { await deleteObject(key); } catch (error) { failures.push(error); }
           }
+          await db.delete(assetDeletionJobs).where(eq(assetDeletionJobs.assetId, assetId));
           await db.delete(assetBindings).where(eq(assetBindings.assetId, assetId));
           await db.delete(assets).where(eq(assets.id, assetId));
           if (failures.length) throw new AggregateError(failures, `Asset ${assetId} object cleanup failed`);
@@ -155,6 +156,21 @@ integrationTest('Asset finalization verifies bytes and ignores late writes to th
     })).ok).toBe(true);
     expect(new Uint8Array(await (await fetch(download.body.data.download_url)).arrayBuffer())).toEqual(bytes);
 
+    const [stagingJob] = await db.select().from(assetDeletionJobs).where(eq(assetDeletionJobs.assetId, reserved.data.id));
+    expect(stagingJob.reason).toBe('staging');
+    expect(stagingJob.status).toBe('queued');
+    expect(new Date(stagingJob.notBefore).getTime()).toBeGreaterThanOrEqual(new Date(reserved.data.created_at).getTime() + 600_000);
+    // Advance only fixture retention deadlines to exercise the real Worker now.
+    await db.update(assetDeletionJobs).set({ notBefore: new Date(0), nextAttemptAt: new Date(0) }).where(eq(assetDeletionJobs.id, stagingJob.id));
+    let cleanedStaging;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      [cleanedStaging] = await db.select().from(assetDeletionJobs).where(eq(assetDeletionJobs.id, stagingJob.id));
+      if (cleanedStaging.status === 'completed') break;
+      await Bun.sleep(100);
+    }
+    expect(cleanedStaging.status).toBe('completed');
+    expect(new Uint8Array(await (await fetch(download.body.data.download_url)).arrayBuffer())).toEqual(bytes);
+
     const duplicate = await reserve('duplicate.png', [bindings[1]]);
     expect(duplicate.meta.duplicate_asset_ids).toContain(reserved.data.id);
     const mismatch = await reserve('mismatch.png', [
@@ -175,9 +191,39 @@ integrationTest('Asset finalization verifies bytes and ignores late writes to th
     expect(corrected.response.status).toBe(200);
     expect(corrected.body.data.status).toBe('ready');
 
-    expect((await request(`/api/v1/assets/${reserved.data.id}`, { method: 'DELETE', headers })).response.status).toBe(200);
+    const retained = await request(`/api/v1/assets/${reserved.data.id}`, { method: 'DELETE', headers });
+    expect(retained.response.status).toBe(409);
+    expect(retained.body.error.code).toBe('ASSET_IN_USE');
+    // Soft-deleted targets remain restorable and retain their original Asset.
+    expect((await request(`/api/v1/records/${record.body.data.id}`, { method: 'DELETE', headers })).response.status).toBe(200);
+    expect((await request(`/api/v1/assets/${reserved.data.id}`, { method: 'DELETE', headers })).response.status).toBe(409);
+    for (const binding of detail.body.data.bindings) {
+      expect((await request(`/api/v1/assets/${reserved.data.id}/bindings/${binding.id}`, { method: 'DELETE', headers })).response.status).toBe(200);
+    }
+    const deleted = await request(`/api/v1/assets/${reserved.data.id}`, { method: 'DELETE', headers });
+    expect(deleted.response.status).toBe(200);
+    expect(deleted.body.meta.deletion_queued).toBe(true);
+    expect((await request(`/api/v1/assets/${reserved.data.id}`, { method: 'DELETE', headers })).body.meta.replayed).toBe(true);
+    const deletionJobs = await request(`/api/v1/assets/${reserved.data.id}/deletion-jobs`, { headers });
+    expect(deletionJobs.response.status).toBe(200);
+    expect(deletionJobs.body.data).toHaveLength(2);
+    const originalJob = deletionJobs.body.data.find((job) => job.reason === 'deleted_asset');
+    expect(originalJob.status).toBe('queued');
+    expect(new Date(originalJob.not_before).getTime()).toBeGreaterThanOrEqual(new Date(deleted.body.data.deleted_at).getTime() + 600_000);
+    expect(new Uint8Array(await (await fetch(download.body.data.download_url)).arrayBuffer())).toEqual(bytes);
+    expect((await request(`/api/v1/assets/${reserved.data.id}/complete`, { method: 'POST', headers, body: '{}' })).response.status).toBe(404);
+    await db.update(assetDeletionJobs).set({ notBefore: new Date(0), nextAttemptAt: new Date(0) }).where(eq(assetDeletionJobs.id, originalJob.id));
+    let purged;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      [purged] = await db.select().from(assetDeletionJobs).where(eq(assetDeletionJobs.id, originalJob.id));
+      if (purged.status === 'completed') break;
+      await Bun.sleep(100);
+    }
+    expect(purged.status).toBe('completed');
+    expect((await fetch(download.body.data.download_url)).status).toBe(404);
+
     expect((await request(`/api/v1/assets/${reserved.data.id}`, { headers })).response.status).toBe(404);
   } finally {
     await scope.cleanup();
   }
-});
+}, 30_000);
