@@ -219,6 +219,12 @@ AI-data-manager / Next.js / SARA / 外部サービス
 
 BunやPostgreSQLなどをホストへ個別にインストールする必要はありません。
 
+MinIOとmcは、公式リリースのコミットを固定した`docker/minio/Dockerfile`からビルドします。公開済みMinIOイメージの取得には依存しません。初回はGo依存パッケージの取得とコンパイルが必要です。これは開発・CI用の構成で、本番のobject保管方式はroadmapのG3で検証します。
+
+English: Development and CI build MinIO and mc from pinned official release commits. The first build downloads Go dependencies and compiles the binaries. Production object storage remains a G3 decision.
+
+简体中文：开发和 CI 从固定的官方发布提交构建 MinIO 和 mc。首次构建需要下载 Go 依赖并编译二进制文件。生产对象存储方案仍在 G3 阶段验证。
+
 ### 1. 環境変数を作成する
 
 ```bash
