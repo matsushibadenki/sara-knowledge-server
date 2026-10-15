@@ -155,6 +155,12 @@ English: Detach Asset bindings before deletion. Originals are retained for 24 ho
 
 简体中文：删除前显式解除Asset绑定。原本默认保留24小时，再由持久Worker任务删除；失败有限重试，耗尽后可由管理员重启。
 
+Asset照合は`bash scripts/reconcile-assets.sh`、再出現objectのJob再開は`bash scripts/reconcile-assets.sh --apply`で実行します。未知objectは削除しません。[操作・終了コード](docs/asset-reconciliation-progress-2026-10-15.md)。
+
+English: Asset reconciliation reports by default. `--apply` requeues eligible completed deletion jobs; unowned objects are never deleted.
+
+简体中文：Asset核对默认为报告模式。`--apply`只重启符合条件的已完成删除任务，不删除未知对象。
+
 ## 現在の実装状況
 
 凡例:
@@ -194,7 +200,8 @@ English: Detach Asset bindings before deletion. Originals are retained for 24 ho
 - [Done] Record参照・workspace権限・承認とrevisionの整合性修復
 - [Done] 共有domain contract、CI統合試験、Worker lease／heartbeat／claim世代／再実行
 - 🟢 [Done] CI統合試験の責務別分割、Asset確定／参照保持／永続削除Job・retry
-- 🟠 [Next] 孤立object照合、DB＋object復元保証
+- 🟢 [Done] Asset孤立object・原本hash照合、遅延upload再出現の削除Job再開
+- 🟠 [Next] DB＋object協調復元保証
 
 ### 将来設計
 
