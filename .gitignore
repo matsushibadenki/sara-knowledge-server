@@ -72,3 +72,6 @@ openapi.generated.json
 *.crt
 *.p12
 *.pfx
+
+# Coordinated backup bundles contain private database and object data
+backups/

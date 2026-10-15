@@ -48,15 +48,17 @@ English: G0.3b is complete. Record provenance and quality Review, Memory synchro
 - 🟢 [Done] **G0.4 ジョブ復旧:** lease／heartbeat／claim世代、世代条件付き確定、定期reaper、retry上限を導入。Redis通知が停止してもtimeout付きでDB pollingを継続し、round-robin claimでJob種別の飢餓を防止。専用Docker試験で回帰確認。
 - 🟢 [Done] **G0.5a Asset保持・削除retry:** 一時upload／確定版の分離に加え、参照中Assetを保持。明示的なbinding解除後の論理削除と永続削除Jobを同一transactionで確定し、原本を既定24時間保持。一時uploadは署名URL失効＋猶予後に回収。WorkerがDB polling、retry上限、lease復旧、claim世代の排除で削除を行う。Job閲覧・管理者retry APIを追加し、ストレージ障害・旧claim・参照保護を検証。[検証記録](asset-retention-and-test-isolation-progress-2026-10-11.md)。
 - 🟢 [Done] **G0.5b1 Asset照合:** Asset namespaceのDB未所有objectを報告し、ready原本の欠損・size／hash不一致とストレージ障害を区別する運用コマンドを追加。削除完了後に再出現した一時upload／削除済み原本は、保持期限・参照・bucket／key・状態を再検査して既存Jobだけを再開する。既定は読み取り専用、未知objectは自動削除しない。[操作・検証](asset-reconciliation-progress-2026-10-15.md)。
-- 🟠 [Next] **G0.5b2 協調復元:** DB＋object backup／restore手順、別環境での参照・hash照合、長時間Worker処理の途中killを実装・検証する。
+- 🟢 [Done] **G0.5b2 協調backup／restore:** API・Worker停止中にDB dumpと設定済みbucketの全現行objectをbundle化し、別Compose projectのDB／MinIOへ復元。全アプリテーブルの件数・内容hash、全object hash、版・polymorphic参照を検証する。欠損・改変・既存環境への上書きを拒否し、通常失敗・協調中断時は元サービスの復帰を試みる。[操作・検証](coordinated-backup-restore-progress-2026-10-15.md)。
+- 🟠 [Next] **G0.4b 実kill試験:** 長時間Worker処理の途中killを再現し、部分結果・再claim・重複防止・最終状態を検証する。
+- ⭕️ [Pending] 本番provider・別物理host・実権限・実データ量でのDB＋object復元とRPO／RTO測定。
 
-English: Referenced Assets are retained, including references to soft-deleted targets. After explicit detachment, logical deletion and durable jobs commit together; originals remain for 24 hours by default. Staging cleanup waits for signed-URL expiry plus grace. PostgreSQL polling, fenced claims, retries and lease recovery are verified. Asset inventory and integrity reconciliation now report unowned keys, missing/corrupt originals and storage errors. Opt-in apply reopens only completed deletion jobs after retention and reference checks, preserving claim generations. Coordinated DB/object restore remains next.
+English: Referenced Assets are retained, including references to soft-deleted targets. After explicit detachment, logical deletion and durable jobs commit together; originals remain for 24 hours by default. Staging cleanup waits for signed-URL expiry plus grace. PostgreSQL polling, fenced claims, retries and lease recovery are verified. Asset inventory and integrity reconciliation now report unowned keys, missing/corrupt originals and storage errors. Opt-in apply reopens only completed deletion jobs after retention and reference checks, preserving claim generations. Offline DB/object bundles now restore into isolated volumes with table fingerprints, object hashes and reference checks. Real Worker mid-operation kill is next; production/off-host restore remains pending.
 
-简体中文：保留被引用的Asset，包括已软删除目标的引用。显式解除绑定后，逻辑删除和持久任务在同一事务提交；原本默认保留24小时。临时上传在签名URL过期并经过宽限期后清理。已验证DB轮询、claim世代、重试及lease恢复；已加入Asset清单及完整性核对，分别报告无DB归属对象、原本缺失／损坏及存储错误。显式apply只在重新检查保留期及引用后重启已完成的删除任务，并保留claim世代。DB／对象协同恢复仍为下一步。
+简体中文：保留被引用的Asset，包括已软删除目标的引用。显式解除绑定后，逻辑删除和持久任务在同一事务提交；原本默认保留24小时。临时上传在签名URL过期并经过宽限期后清理。已验证DB轮询、claim世代、重试及lease恢复；已加入Asset清单及完整性核对，分别报告无DB归属对象、原本缺失／损坏及存储错误。显式apply只在重新检查保留期及引用后重启已完成的删除任务，并保留claim世代。已实现离线DB／对象bundle及隔离恢复，并核对表fingerprint、对象hash和引用。下一步为Worker处理中途kill；生产／其他物理host恢复仍为Pending。
 
-残る順序はG0.5b2 → G1。G0.3b、G0.4、G0.5a、G0.5b1は完了した。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
+残る順序はG0.4b → G1。G0.3b、G0.4のlease復旧、G0.5a、G0.5b1、G0.5b2の開発環境検証は完了した。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
 
-**完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。Jobのlease切れ、旧claim、Redis停止、retry上限と公平性、およびAsset確定後の旧PUT URL再利用による原本不変性は確認済み。object削除失敗からのretryとlease切れの復旧も確認済み。長時間処理の途中kill、別環境へのDB＋object復元を追加確認し、参照とhashを一致させる。
+**完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。Jobのlease切れ、旧claim、Redis停止、retry上限と公平性、およびAsset確定後の旧PUT URL再利用による原本不変性は確認済み。object削除失敗からのretryとlease切れの復旧も確認済み。別Compose projectのDB＋object復元と参照・hash一致は確認済み。長時間処理の途中killを追加確認する。本番・別物理hostの復元保証はPendingとする。
 
 ## G1 — 訂正できる知識モデル（G0完了後）
 

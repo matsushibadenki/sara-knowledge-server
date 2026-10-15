@@ -161,6 +161,12 @@ English: Asset reconciliation reports by default. `--apply` requeues eligible co
 
 简体中文：Asset核对默认为报告模式。`--apply`只重启符合条件的已完成删除任务，不删除未知对象。
 
+DB＋objectの協調backup／restore：`bun scripts/coordinated-backup.js backup DIR`でメンテナンス取得し、`restore DIR sara-restore-NAME`で独立環境へ復元・検証します。`verify DIR`はbundle検査、`check-restored DIR sara-restore-NAME`は復元先の再検証です。[前提・操作・検証範囲](docs/coordinated-backup-restore-progress-2026-10-15.md)。
+
+English: Offline coordinated DB/object bundles restore into isolated Compose volumes; input checksums, restored table fingerprints, references and object hashes are verified. Production/off-host validation remains pending.
+
+简体中文：离线DB／对象bundle恢复到独立Compose volume，核对输入checksum、恢复表fingerprint、引用及对象hash；生产／其他物理host验证仍为Pending。
+
 ## 現在の実装状況
 
 凡例:
@@ -201,7 +207,8 @@ English: Asset reconciliation reports by default. `--apply` requeues eligible co
 - [Done] 共有domain contract、CI統合試験、Worker lease／heartbeat／claim世代／再実行
 - 🟢 [Done] CI統合試験の責務別分割、Asset確定／参照保持／永続削除Job・retry
 - 🟢 [Done] Asset孤立object・原本hash照合、遅延upload再出現の削除Job再開
-- 🟠 [Next] DB＋object協調復元保証
+- 🟢 [Done] 開発ComposeのDB＋object協調backup／隔離restore・参照／hash検証
+- 🟠 [Next] 長時間Worker処理の実kill試験
 
 ### 将来設計
 
