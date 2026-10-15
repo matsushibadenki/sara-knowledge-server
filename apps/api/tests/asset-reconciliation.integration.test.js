@@ -77,6 +77,12 @@ recoveryTest('Asset reconciliation reports integrity loss and safely requeues a 
     const inaccessible = await reconcileAssets({ ...options, apply: true, statObject: async () => { throw new Error('Storage unavailable'); } });
     expect(inaccessible.errors).toBe(2);
     expect(findings.every((finding) => finding.type === 'storage_error')).toBe(true);
+    findings.length = 0;
+    const missingBucket = await reconcileAssets({ ...options, statObject: async () => {
+      throw Object.assign(new Error('Bucket unavailable'), { code: 'NoSuchBucket', status: 404 });
+    } });
+    expect(missingBucket.errors).toBe(2);
+    expect(findings.every((finding) => finding.type === 'storage_error')).toBe(true);
 
     // Reappearing deleted originals must still pass the reference check.
     expect((await request(`/api/v1/assets/${id}/bindings/${reserved.body.data.bindings[0].id}`, { method: 'DELETE', headers })).response.status).toBe(200);

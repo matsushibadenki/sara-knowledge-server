@@ -23,7 +23,7 @@ export async function reconcileAssets({ sql, bucket, statObject, readObjectBytes
       for (const key of [asset.object_key, asset.staging_object_key].filter(Boolean)) {
         let stat;
         try { stat = await statObject(key); } catch (error) {
-          if (!missingCodes.has(error.code) && error.status !== 404) {
+          if (!missingCodes.has(error.code)) {
             await emit({ type: 'storage_error', asset_id: asset.id, key, error: String(error.message) });
             continue;
           }

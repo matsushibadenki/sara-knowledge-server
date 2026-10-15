@@ -13,7 +13,7 @@ bash scripts/reconcile-assets.sh --apply
 
 MinIOのinventoryを一時ファイルへ完全に取得してから、APIコンテナで照合する。JSONLを逐次処理し、DBのAssetはUUID cursorで100件ずつ読む。対象bucketはAPIコンテナの`MINIO_BUCKET`（既定`sara-assets`）から取得し、Composeの`.env`設定も反映する。未知objectの判定対象は`assets/` namespaceだけで、Dataset manifest／Import／Exportは対象外。原本hash確認はreadyかつ有効なAssetの本文を順次読むため、保管量に応じてI/Oが発生する。
 
-出力はJSONL。`unowned_object`、`missing_original`、`original_integrity_mismatch`、`storage_error`、`reappeared_object`を区別し、最後に`summary`を出す。存在しないkeyと接続・権限などの障害を混同しない。終了コードは0＝未解決検出なし、2＝未解決検出／ストレージ障害あり、1＝不正入力やコマンド障害。再開したJobは`summary.requeued`で確認する。コード0も削除完了を意味せず、完了は削除Job APIで確認する。
+出力はJSONL。`unowned_object`、`missing_original`、`original_integrity_mismatch`、`storage_error`、`reappeared_object`を区別し、最後に`summary`を出す。存在しないkeyと接続・権限などの障害を混同しない。HTTP 404だけでは欠損と判断せず、bucket不存在もストレージ障害として扱う。終了コードは0＝未解決検出なし、2＝未解決検出／ストレージ障害あり、1＝不正入力やコマンド障害。再開したJobは`summary.requeued`で確認する。コード0も削除完了を意味せず、完了は削除Job APIで確認する。
 
 `--apply`は`completed`かつ保持期限を過ぎたJobのみ対象とする。Asset行をlockし、bucket・key・状態・参照を再検査してから同じJobを`queued`へ戻す。claim世代と保持期限を維持し、今回の再出現に対する試行回数だけ0へ戻す。稼働中・queued・failedのJobは上書きしない。failedは既存の管理者retry APIを利用する。未知object・参照中原本・有効原本を自動削除しない。報告後に参照状態が変わっても、Workerが削除直前に再検査する。
 
@@ -27,7 +27,7 @@ bash scripts/test-asset-deletion-recovery.sh
 bash scripts/reconcile-assets.sh
 ```
 
-専用Docker試験は通常Workerを停止し、実PostgreSQL／MinIOで実行する。署名PUTで一時uploadを再出現させ、reportが変更しないこと、apply後のJob再実行で一時uploadだけが消えること、claim世代が進むこと、重複apply、未知keyの保持、原本の欠損／破損、ストレージ障害、削除済み原本に新たな参照がある場合の保持も確認する。試験fixtureの保持期限だけを進め、実際に10分待った試験とは区別する。CIは既存のAsset復旧stepでこの試験も実行し、全統合試験後にinventoryコマンドも確認する。専用試験は2 pass／0 fail、73 assertions。ローカル単体・共通契約は18 pass／17 skip（外部環境試験は無効）。実inventoryのコマンドも未解決検出0で正常終了した。全API統合試験は29 pass／2 skip／0 fail、527 assertions（skipの2件は前述の専用試験で実行済み）。
+専用Docker試験は通常Workerを停止し、実PostgreSQL／MinIOで実行する。署名PUTで一時uploadを再出現させ、reportが変更しないこと、apply後のJob再実行で一時uploadだけが消えること、claim世代が進むこと、重複apply、未知keyの保持、原本の欠損／破損、ストレージ障害、削除済み原本に新たな参照がある場合の保持も確認する。試験fixtureの保持期限だけを進め、実際に10分待った試験とは区別する。CIは既存のAsset復旧stepでこの試験も実行し、全統合試験後にinventoryコマンドも確認する。専用試験は2 pass／0 fail、75 assertions。ローカル単体・共通契約は18 pass／17 skip（外部環境試験は無効）。実inventoryのコマンドも未解決検出0で正常終了した。全API統合試験は29 pass／2 skip／0 fail、527 assertions（skipの2件は前述の専用試験で実行済み）。
 
 🟠 [Next] **G0.5b2:** DB＋objectを組み合わせたbackup／restore、別環境での参照とhash照合、長時間Worker処理の途中kill。今回、復元保証まで完了したとは扱わない。
 
