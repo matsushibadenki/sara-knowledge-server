@@ -1,0 +1,18 @@
+# Used only with docker-compose.restore.yml in a disposable test project.
+services:
+  worker:
+    image: sara-knowledge-server-worker:latest
+    environment:
+      DATABASE_URL: postgresql://restore:restore_isolated_only@postgres:5432/restore
+      REDIS_URL: redis://127.0.0.1:1
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: restore_only
+      MINIO_SECRET_KEY: restore_isolated_only
+      MINIO_BUCKET: sara-assets
+      WORKER_CHUNK_SIZE: 10
+      JOB_LEASE_SECONDS: 10
+      JOB_HEARTBEAT_SECONDS: 2
+      JOB_REAPER_INTERVAL_SECONDS: 2
+      JOB_RETRY_DELAY_SECONDS: 0
+      JOB_REDIS_TIMEOUT_MS: 100

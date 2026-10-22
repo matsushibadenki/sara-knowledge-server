@@ -40,6 +40,9 @@ jobs:
       - name: Verify job recovery without Redis notifications
         run: bash scripts/test-job-recovery.sh
 
+      - name: Verify real Worker SIGKILL recovery in disposable volumes
+        run: bun scripts/test-worker-crash.js
+
       - name: Verify Asset deletion retries and lease recovery
         run: bash scripts/test-asset-deletion-recovery.sh
 
