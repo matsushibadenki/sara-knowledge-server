@@ -11,7 +11,8 @@ import {
   records,
   recordVersions,
 } from '../db/schema/index.js';
-import { readObject, storeObject } from '../services/background-jobs.js';
+import { readBoundedObject, readObject, storeObject } from '../services/background-jobs.js';
+import { createBundleFiles, SnapshotBundleError } from '../services/snapshot-bundle.js';
 import { sha256 } from '../services/import-export.js';
 
 const recordTypes = [
@@ -299,6 +300,106 @@ datasetRoutes.get('/:id/snapshots/:snapshotId/manifest', requireScopes('datasets
   c.header('Content-Disposition', `attachment; filename="dataset-${definition.id}-${snapshot.id}.${snapshot.manifestFormat}"`);
   c.header('X-Content-SHA256', snapshot.manifestHash);
   return c.body(content);
+});
+
+datasetRoutes.get('/:id/snapshots/:snapshotId/bundle', requireScopes('datasets:read', 'records:read', 'sources:read', 'assets:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const id = uuidSchema.safeParse(c.req.param('id'));
+  const snapshotId = uuidSchema.safeParse(c.req.param('snapshotId'));
+  if (!id.success || !snapshotId.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Invalid Snapshot ID.');
+  const [match] = await db.select({ snapshot: datasetSnapshots }).from(datasetSnapshots)
+    .innerJoin(datasetDefinitions, eq(datasetDefinitions.id, datasetSnapshots.definitionId))
+    .where(and(eq(datasetSnapshots.id, snapshotId.data), eq(datasetDefinitions.id, id.data), isNull(datasetDefinitions.deletedAt)))
+    .limit(1);
+  if (!match) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Snapshot was not found.');
+  const { snapshot } = match;
+  if (snapshot.status !== 'completed' || !snapshot.manifestObjectKey || !snapshot.manifestHash) {
+    return errorResponse(c, 409, 'MANIFEST_NOT_READY', 'Snapshot manifest is not ready.');
+  }
+
+  const bundle = createBundleFiles();
+  try {
+    const manifestBytes = await readBoundedObject(snapshot.manifestObjectKey, bundle.remaining);
+    const manifestPath = `manifest.${snapshot.manifestFormat}`;
+    await bundle.add(manifestPath, manifestBytes, snapshot.manifestHash);
+    const manifestText = manifestBytes.toString('utf8');
+    const manifest = snapshot.manifestFormat === 'jsonl'
+      ? JSON.parse(manifestText.slice(0, manifestText.indexOf('\n'))) : JSON.parse(manifestText);
+    if (manifest.schema !== 'sara.dataset-manifest/1.2') {
+      return errorResponse(c, 409, 'BUNDLE_PROVENANCE_UNAVAILABLE', 'Snapshot lacks frozen Asset provenance.');
+    }
+
+    const versions = await db.execute(sql`
+      SELECT m.ordinal, v.id, v.record_id, v.version_number, v.schema_version,
+             v.content, v.plain_text, v.context_snapshot, v.source_id, v.source_revision, v.source_pin_state
+      FROM dataset.dataset_snapshot_records m
+      JOIN dataset.record_versions v ON v.id = m.record_version_id AND v.record_id = m.record_id
+      WHERE m.snapshot_id = ${snapshot.id}
+      ORDER BY m.ordinal`);
+    if (versions.length !== snapshot.recordCount) {
+      throw new SnapshotBundleError('BUNDLE_INTEGRITY_ERROR', 'Snapshot membership is incomplete.');
+    }
+    const entries = snapshot.manifestFormat === 'jsonl'
+      ? manifestText.trimEnd().split('\n').slice(1).map((line) => JSON.parse(line))
+      : manifest.records;
+    if (entries.length !== versions.length || versions.some((v, i) =>
+      entries[i].record_version_id !== v.id || entries[i].ordinal !== v.ordinal ||
+      entries[i].source_id !== v.source_id || entries[i].source_revision !== v.source_revision)) {
+      throw new SnapshotBundleError('BUNDLE_INTEGRITY_ERROR', 'Snapshot membership differs from the manifest.');
+    }
+    if (versions.some((v) => v.source_pin_state === 'legacy_unknown' || !v.context_snapshot)) {
+      return errorResponse(c, 409, 'BUNDLE_PROVENANCE_UNAVAILABLE', 'A Snapshot member lacks frozen provenance.');
+    }
+    await bundle.add('records.json', Buffer.from(JSON.stringify(versions)));
+
+    const sources = await db.execute(sql`
+      SELECT DISTINCT s.source_id, s.revision, s.origin, s.recorded_at, s.snapshot
+      FROM dataset.dataset_snapshot_records m
+      JOIN dataset.record_versions v ON v.id = m.record_version_id
+      JOIN dataset.source_revisions s ON s.source_id = v.source_id AND s.revision = v.source_revision
+      WHERE m.snapshot_id = ${snapshot.id}
+      ORDER BY s.source_id, s.revision`);
+    const sourcePins = new Set(versions.filter((v) => v.source_id).map((v) => `${v.source_id}:${v.source_revision}`));
+    if (sources.length !== sourcePins.size) {
+      throw new SnapshotBundleError('BUNDLE_INTEGRITY_ERROR', 'A frozen Source version is missing.');
+    }
+    await bundle.add('sources.json', Buffer.from(JSON.stringify(sources)));
+
+    const expectedAssets = new Map(manifest.asset_bindings_at_creation.map((a) => [a.asset_id, a]));
+    const pinnedAssets = await db.execute(sql`
+      SELECT a.id, a.sha256, a.size_bytes::text AS size_bytes, a.bucket_name, a.object_key
+      FROM dataset.dataset_snapshot_assets p JOIN dataset.assets a ON a.id = p.asset_id
+      WHERE p.snapshot_id = ${snapshot.id} AND a.status = 'ready' AND a.deleted_at IS NULL
+      ORDER BY a.id`);
+    if (pinnedAssets.length !== expectedAssets.size) {
+      return errorResponse(c, 409, 'BUNDLE_PROVENANCE_UNAVAILABLE', 'Snapshot Asset retention references are incomplete.');
+    }
+    for (const asset of pinnedAssets) {
+      const expected = expectedAssets.get(asset.id);
+      if (!expected || expected.sha256 !== asset.sha256 || expected.size_bytes !== asset.size_bytes) {
+        throw new SnapshotBundleError('BUNDLE_INTEGRITY_ERROR', 'Asset metadata differs from the manifest.');
+      }
+      const size = Number(expected.size_bytes);
+      if (!Number.isSafeInteger(size) || size > bundle.remaining) throw new RangeError('Snapshot Assets exceed the bundle budget.');
+      const bytes = await readBoundedObject(asset.object_key, size, asset.bucket_name);
+      if (bytes.length !== size) throw new SnapshotBundleError('BUNDLE_INTEGRITY_ERROR', 'Asset byte count differs from the manifest.');
+      await bundle.add(`assets/${asset.id}`, bytes, expected.sha256);
+    }
+    const payload = JSON.stringify({ schema: 'sara.snapshot-bundle/1', snapshot_id: snapshot.id, files: bundle.files });
+    c.header('Content-Disposition', `attachment; filename="snapshot-${snapshot.id}.bundle.json"`);
+    c.header('Content-Type', 'application/json');
+    c.header('Cache-Control', 'private, no-store');
+    c.header('X-Content-SHA256', await sha256(payload));
+    return c.body(payload);
+  } catch (error) {
+    if (error instanceof RangeError || error.code === 'BUNDLE_TOO_LARGE') {
+      return errorResponse(c, 413, 'BUNDLE_TOO_LARGE', 'Snapshot bundle exceeds the synchronous export limit.');
+    }
+    if (error instanceof SnapshotBundleError) return errorResponse(c, 409, error.code, error.message);
+    if (error.code === 'NoSuchKey' || error.code === 'NoSuchBucket') {
+      return errorResponse(c, 409, 'BUNDLE_OBJECT_MISSING', 'A Snapshot object is missing.');
+    }
+    throw error;
+  }
 });
 
 export default datasetRoutes;

@@ -7,7 +7,7 @@ import {
   refreshTokens, sources, trainingMetrics, trainingModels, trainingRuns,
 } from '../src/db/schema/index.js';
 import { hashSecret } from '../src/auth/secrets.js';
-import { deleteObject } from '../src/services/background-jobs.js';
+import { deleteObject, hashBytes, storeObject } from '../src/services/background-jobs.js';
 import { createIntegrationFixture } from './support/integration-fixture.js';
 
 const integrationTest = process.env.RUN_INTEGRATION === '1' ? test : test.skip;
@@ -87,10 +87,14 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
     });
     expect(duplicateDefinition.response.status).toBe(409);
 
+    const assetKey = `snapshot-fixture/${crypto.randomUUID()}`;
+    const original = Buffer.from('test');
+    await storeObject(assetKey, original);
+    scope.defer(() => deleteObject(assetKey));
     const [asset] = await db.insert(assets).values({
-      bucketName: 'fixture', objectKey: `snapshot-fixture/${crypto.randomUUID()}`,
+      bucketName: process.env.MINIO_BUCKET || 'sara-assets', objectKey: assetKey,
       originalFilename: 'fixture.txt', mimeType: 'text/plain', sizeBytes: 4,
-      sha256: 'a'.repeat(64), status: 'ready', createdBy: login.body.data.user.id,
+      sha256: await hashBytes(original), status: 'ready', createdBy: login.body.data.user.id,
     }).returning();
     scope.defer(() => db.delete(assets).where(eq(assets.id, asset.id)));
     const [binding] = await db.insert(assetBindings).values({
@@ -173,6 +177,25 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
     }
     expect(manifestText).toContain(frozenMember.record_version_id);
     expect(manifestText).not.toContain(revised.body.data.current_version_id);
+
+    const bundlePath = `/api/v1/datasets/${definition.body.data.id}/snapshots/${snapshot.body.data.id}/bundle`;
+    const bundleResponse = await app.request(bundlePath, { headers });
+    expect(bundleResponse.status).toBe(200);
+    const bundleBytes = Buffer.from(await bundleResponse.arrayBuffer());
+    expect(await hashBytes(bundleBytes)).toBe(bundleResponse.headers.get('X-Content-SHA256'));
+    const bundle = JSON.parse(bundleBytes.toString());
+    for (const file of bundle.files) {
+      expect(await hashBytes(Buffer.from(file.base64, 'base64'))).toBe(file.sha256);
+    }
+    const file = (path) => Buffer.from(bundle.files.find((entry) => entry.path === path).base64, 'base64').toString();
+    expect(file('manifest.jsonl')).toBe(manifestText);
+    expect(JSON.parse(file('records.json')).map((record) => record.id)).toContain(frozenMember.record_version_id);
+    expect(JSON.parse(file('sources.json'))[0].snapshot.title).toBe('Independent Dataset source');
+    expect(file(`assets/${asset.id}`)).toBe('test');
+    await storeObject(assetKey, Buffer.from('oops'));
+    expect((await request(bundlePath, { headers })).body.error.code).toBe('BUNDLE_INTEGRITY_ERROR');
+    await deleteObject(assetKey);
+    expect((await request(bundlePath, { headers })).body.error.code).toBe('BUNDLE_OBJECT_MISSING');
 
     const model = await request('/api/v1/training/models', {
       method: 'POST', headers,

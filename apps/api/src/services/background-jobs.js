@@ -1,12 +1,12 @@
 const queue = new Bun.RedisClient(process.env.REDIS_URL || 'redis://localhost:6379');
 
-function s3Client() {
+function s3Client(bucket = process.env.MINIO_BUCKET || 'sara-assets') {
   const protocol = process.env.MINIO_USE_SSL === 'true' ? 'https' : 'http';
   return new Bun.S3Client({
     endpoint: `${protocol}://${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || '9000'}`,
     accessKeyId: process.env.MINIO_ACCESS_KEY || 'sara_minio',
     secretAccessKey: process.env.MINIO_SECRET_KEY || 'change_me',
-    bucket: process.env.MINIO_BUCKET || 'sara-assets',
+    bucket,
     region: 'us-east-1',
   });
 }
@@ -40,6 +40,25 @@ export async function statObject(key) {
 
 export async function readObjectBytes(key) {
   return new Uint8Array(await s3Client().file(key).arrayBuffer());
+}
+
+export async function readBoundedObject(key, limit, bucket) {
+  const reader = s3Client(bucket).file(key).stream().getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) throw new RangeError('Object exceeds the permitted byte count.');
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks, size);
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 
 export async function hashBytes(bytes) {
