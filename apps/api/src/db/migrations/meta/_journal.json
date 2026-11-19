@@ -211,6 +211,13 @@
       "when": 1795049114903,
       "tag": "0029_tan_unicorn",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795060222816,
+      "tag": "0030_spotty_mauler",
+      "breakpoints": true
     }
   ]
 }

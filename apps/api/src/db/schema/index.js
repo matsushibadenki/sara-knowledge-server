@@ -867,6 +867,7 @@ export const memoryRelations = memorySchema.table('relations', {
 }));
 
 export const memoryRelationEvidence = memorySchema.table('relation_evidence', {
+  referenceSnapshot: jsonb('reference_snapshot'),
   id: uuid('id').defaultRandom().primaryKey(),
   evidenceUid: text('evidence_uid').notNull(),
   relationId: uuid('relation_id').notNull().references(() => memoryRelations.id, { onDelete: 'cascade' }),

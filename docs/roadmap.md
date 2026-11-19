@@ -52,19 +52,19 @@ English: G0.3b is complete. Record provenance and quality Review, Memory synchro
 - 🟢 [Done] **G0.4b 実kill試験:** 隔離DB／object storeと実Workerを使い、Importの行transaction、Exportのobject保存後の完了UPDATE、Memory Eventの一括INSERT中にSIGKILL。部分結果のrollback、自然なlease切れからの再claim、欠落・重複防止、最終参照・byte／hashを検証。CIへ追加。[検証記録](worker-crash-recovery-progress-2026-10-22.md)。
 - ⭕️ [Pending] 本番provider・別物理host・実権限・実データ量でのDB＋object復元とRPO／RTO測定。
 
-English: Referenced Assets are retained, including references to soft-deleted targets. After explicit detachment, logical deletion and durable jobs commit together; originals remain for 24 hours by default. Staging cleanup waits for signed-URL expiry plus grace. PostgreSQL polling, fenced claims, retries and lease recovery are verified. Asset inventory and integrity reconciliation now report unowned keys, missing/corrupt originals and storage errors. Opt-in apply reopens only completed deletion jobs after retention and reference checks, preserving claim generations. Offline DB/object bundles now restore into isolated volumes with table fingerprints, object hashes and reference checks. Actual Worker SIGKILL during Import, Export and Memory ingestion is verified in disposable volumes, including partial rollback, recovered claims and final object hashes. Source revision and Record provenance pins are implemented; Evidence revision pins are next; production/off-host restore remains pending.
+English: Referenced Assets are retained, including references to soft-deleted targets. After explicit detachment, logical deletion and durable jobs commit together; originals remain for 24 hours by default. Staging cleanup waits for signed-URL expiry plus grace. PostgreSQL polling, fenced claims, retries and lease recovery are verified. Asset inventory and integrity reconciliation now report unowned keys, missing/corrupt originals and storage errors. Opt-in apply reopens only completed deletion jobs after retention and reference checks, preserving claim generations. Offline DB/object bundles now restore into isolated volumes with table fingerprints, object hashes and reference checks. Actual Worker SIGKILL during Import, Export and Memory ingestion is verified in disposable volumes, including partial rollback, recovered claims and final object hashes. Source revision and Record provenance pins are implemented; Evidence reference pins and provenance grouping are implemented; production/off-host restore remains pending.
 
-简体中文：保留被引用的Asset，包括已软删除目标的引用。显式解除绑定后，逻辑删除和持久任务在同一事务提交；原本默认保留24小时。临时上传在签名URL过期并经过宽限期后清理。已验证DB轮询、claim世代、重试及lease恢复；已加入Asset清单及完整性核对，分别报告无DB归属对象、原本缺失／损坏及存储错误。显式apply只在重新检查保留期及引用后重启已完成的删除任务，并保留claim世代。已实现离线DB／对象bundle及隔离恢复，并核对表fingerprint、对象hash和引用。已在隔离volume验证Import、Export和Memory导入中的真实SIGKILL，包括部分回滚、重新claim和最终object hash。已实现Source版本和Record出典固定，下一步为Evidence版本固定；生产／其他物理host恢复仍为Pending。
+简体中文：保留被引用的Asset，包括已软删除目标的引用。显式解除绑定后，逻辑删除和持久任务在同一事务提交；原本默认保留24小时。临时上传在签名URL过期并经过宽限期后清理。已验证DB轮询、claim世代、重试及lease恢复；已加入Asset清单及完整性核对，分别报告无DB归属对象、原本缺失／损坏及存储错误。显式apply只在重新检查保留期及引用后重启已完成的删除任务，并保留claim世代。已实现离线DB／对象bundle及隔离恢复，并核对表fingerprint、对象hash和引用。已在隔离volume验证Import、Export和Memory导入中的真实SIGKILL，包括部分回滚、重新claim和最终object hash。已实现Source版本和Record出典固定，也已实现Evidence版本固定；生产／其他物理host恢复仍为Pending。
 
-G1のSource revisionと出典版固定は完了し、次はEvidenceの参照revision固定。G0の開発環境検証は実kill試験を含め完了した。本番provider・別物理hostの確認は引き続きPendingであり、G1の開発とは分けて扱う。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
+G1のSource revisionと出典版固定は完了し、Evidenceの参照revision固定も完了。G0の開発環境検証は実kill試験を含め完了した。本番provider・別物理hostの確認は引き続きPendingであり、G1の開発とは分けて扱う。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
 
 **完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。Jobのlease切れ、旧claim、Redis停止、retry上限と公平性、およびAsset確定後の旧PUT URL再利用による原本不変性は確認済み。object削除失敗からのretryとlease切れの復旧も確認済み。別Compose projectのDB＋object復元と参照・hash一致は確認済み。実WorkerのImport／Export／Memory処理途中killと再開も確認済み。本番・別物理hostの復元保証はPendingとする。
 
 ## G1 — 訂正できる知識モデル（現在の着手対象）
 
 - 🟢 [Done] Source revision、Record Versionの解釈属性と出典版固定。DB triggerでAPI／同期・非同期Importへ適用。明示的な再固定以外は旧pinを継承し、旧データはlegacy_unknownを保持。Snapshot manifest 1.1へpinとcontextを格納。[migration・検証・制限](source-revisions-progress-2026-11-19.md)。
-- 🟠 [Next] Evidenceを参照対象revisionへ固定し、独立Sourceと重複証拠を区別
-- 🔴 [Later] valid time／recorded time、supersedes／retraction、文脈付き矛盾の最小表現
+- 🟢 [Done] Evidenceの参照版を登録時に固定。出典IDごとのグループと同一内容hashを一覧で表示。[検証記録](evidence-reference-pins.md)。
+- 🟠 [Next] valid time／recorded time、supersedes／retraction、文脈付き矛盾の最小表現
 - 🔴 [Later] 依存関係とtransactional outbox、stale判定、再検証Job、取消の利用trace
 - 🔴 [Later] 不変Snapshotの影響表示、Source／Asset／policy版を含む再現bundle
 

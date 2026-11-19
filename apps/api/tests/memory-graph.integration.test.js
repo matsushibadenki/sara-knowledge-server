@@ -95,6 +95,34 @@ integrationTest('Memory graph bounds, evidence and verification revisions remain
     });
     expect(editorRecordEvidence.response.status).toBe(201);
 
+    const originalPin = editorRecordEvidence.body.data.evidence.reference_pin;
+    expect(originalPin).toMatchObject({
+      record_version_id: createdRecord.body.data.current_version.id, revision: 1,
+      source_id: sourceId, source_revision: 1,
+    });
+    const updatedSource = await request(`/api/v1/sources/${sourceId}`, {
+      method: 'PATCH', headers, body: JSON.stringify({ title: 'Corrected source', expected_revision: 1 }),
+    });
+    expect(updatedSource.response.status).toBe(200);
+    const updatedRecord = await request(`/api/v1/records/${recordId}`, {
+      method: 'PATCH', headers, body: JSON.stringify({ source_id: sourceId, expected_version: 1 }),
+    });
+    expect(updatedRecord.response.status).toBe(200);
+    const evidencePath = `/api/v1/memory/relations/${editorRecordRelation.body.data.id}/evidence`;
+    const added = await request(evidencePath, {
+      method: 'POST', headers: editorHeaders, body: JSON.stringify({
+        expected_revision: editorRecordEvidence.body.data.relation.revision,
+        evidence_uid: crypto.randomUUID(), evidence_type: 'record',
+        reference_type: 'record', reference_id: recordId, supports: true,
+      }),
+    });
+    expect(added.response.status).toBe(201);
+    expect(added.body.data.evidence.reference_pin.source_revision).toBe(2);
+    const history = await request(evidencePath, { headers });
+    expect(history.body.data.find((item) => item.id === editorRecordEvidence.body.data.evidence.id).reference_pin).toEqual(originalPin);
+    expect(history.body.meta.source_groups).toHaveLength(1);
+    expect(history.body.meta.source_groups[0].evidence_ids).toHaveLength(2);
+
     const editorCanReferenceWorkspaceMemory = await request('/api/v1/memory/relations', {
       method: 'POST', headers: editorHeaders,
       body: JSON.stringify({

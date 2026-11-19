@@ -22,9 +22,11 @@ import {
   memoryRelations,
   memoryVerificationDecisions,
   sources,
+  recordVersions,
+  sourceRevisions,
 } from '../db/schema/index.js';
 import { enqueueBackgroundJob, storeObject } from '../services/background-jobs.js';
-import { findAccessibleResource } from '../services/resource-access.js';
+import { findAccessibleResource, resourceAccessConditions } from '../services/resource-access.js';
 
 const uuidSchema = z.string().uuid();
 const jsonObject = z.record(z.string(), z.unknown());
@@ -160,7 +162,7 @@ const serializers = {
   relation: (item) => ({ ...common(item), relation_uid: item.relationUid, source_type: item.sourceType, source_id: item.sourceId, relation_type: item.relationType, target_type: item.targetType, target_id: item.targetId, strength: item.strength, confidence: item.confidence, evidence_count: item.evidenceCount, counterexample_count: item.counterexampleCount, min_delay_ms: item.minDelayMs, max_delay_ms: item.maxDelayMs, valid_from: item.validFrom, valid_until: item.validUntil, expires_at: item.expiresAt, verification_state: item.verificationState, proposal_source: item.proposalSource, context: item.context, payload: item.payload }),
 };
 const serializeAlias = (item) => ({ ...common(item), entity_id: item.entityId, alias: item.alias, normalized_alias: item.normalizedAlias, language_code: item.languageCode, alias_type: item.aliasType, confidence: item.confidence, proposal_source: item.proposalSource, verification_state: item.verificationState });
-const serializeEvidence = (item) => ({ id: item.id, evidence_uid: item.evidenceUid, relation_id: item.relationId, evidence_type: item.evidenceType, reference_type: item.referenceType, reference_id: item.referenceId, supports: item.supports, weight: item.weight, details: item.details, created_by: item.createdBy, created_at: item.createdAt });
+const serializeEvidence = (item) => ({ id: item.id, evidence_uid: item.evidenceUid, relation_id: item.relationId, evidence_type: item.evidenceType, reference_type: item.referenceType, reference_id: item.referenceId, reference_pin: item.referenceSnapshot?.pin ?? null, supports: item.supports, weight: item.weight, details: item.details, created_by: item.createdBy, created_at: item.createdAt });
 const serializeDecision = (item) => ({ id: item.id, target_type: item.targetType, target_id: item.targetId, target_revision: item.targetRevision, target_snapshot: item.targetSnapshot, from_state: item.fromState, to_state: item.toState, notes: item.notes, metadata: item.metadata, decided_by: item.decidedBy, created_at: item.createdAt });
 const serializeEventJob = (item) => ({
   id: item.id, batch_uid: item.batchUid, content_hash: item.contentHash, status: item.status,
@@ -479,11 +481,38 @@ function normalizeAlias(value) {
   return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-async function validateEvidenceReference(type, id, ownerId) {
-  if (type === 'external') return id == null;
-  if (!id) return false;
-  if (type === 'source') return validateSource(id, ownerId);
-  return validateNode(type, id, ownerId);
+async function pinEvidenceReference(tx, type, id) {
+  if (type === 'external') return { pin: { state: 'external' } };
+  const { table, where } = resourceAccessConditions(type, id);
+  const [target] = await tx.select().from(table).where(where).limit(1).for('share');
+  if (!target) return null;
+
+  const pin = { state: 'captured', revision: target.revision ?? null };
+  if (type === 'record') {
+    if (!target.currentVersionId) return null;
+    const [version] = await tx.select().from(recordVersions).where(and(
+      eq(recordVersions.id, target.currentVersionId), eq(recordVersions.recordId, id),
+      isNull(recordVersions.deletedAt),
+    )).limit(1);
+    if (!version) return null;
+    pin.record_version_id = version.id;
+    pin.revision = version.versionNumber;
+    pin.source_id = version.sourceRevision == null ? null : version.sourceId;
+    pin.source_revision = version.sourceRevision;
+    if (pin.source_id) {
+      const [source] = await tx.select({ snapshot: sourceRevisions.snapshot }).from(sourceRevisions)
+        .where(and(eq(sourceRevisions.sourceId, pin.source_id), eq(sourceRevisions.revision, pin.source_revision)));
+      pin.source_content_hash = source?.snapshot.content_hash ?? null;
+    }
+    return { pin };
+  }
+  if (type === 'source') {
+    Object.assign(pin, { source_id: id, source_revision: target.revision, source_content_hash: target.contentHash });
+    return { pin };
+  }
+  // Other targets do not yet have a historical read API. Preserve their
+  // registration-time state internally without widening Memory read scopes.
+  return { pin, target };
 }
 
 memoryRoutes.get('/entities/:id/aliases', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
@@ -529,6 +558,30 @@ memoryRoutes.delete('/entities/:entityId/aliases/:aliasId', requireScopes('memor
   return c.json({ data: serializeAlias(deleted), meta: {}, error: null });
 });
 
+function evidenceSourceGroups(items) {
+  const bySource = new Map();
+  const byHash = new Map();
+  const add = (groups, key, id) => {
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(id);
+  };
+  let unknown = 0;
+  for (const item of items) {
+    const pin = item.referenceSnapshot?.pin;
+    if (!pin?.source_id) {
+      unknown++;
+      continue;
+    }
+    add(bySource, pin.source_id, item.id);
+    if (pin.source_content_hash) add(byHash, pin.source_content_hash, item.id);
+  }
+  return {
+    source_groups: [...bySource].map(([source_id, evidence_ids]) => ({ source_id, evidence_ids })),
+    matching_content_groups: [...byHash.values()].filter((ids) => ids.length > 1),
+    unknown_source_count: unknown,
+  };
+}
+
 memoryRoutes.get('/relations/:id/evidence', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Relation ID must be a UUID.');
@@ -537,7 +590,7 @@ memoryRoutes.get('/relations/:id/evidence', requireScopes('memory:read'), requir
   const items = await db.select().from(memoryRelationEvidence).where(and(
     eq(memoryRelationEvidence.relationId, relation.id),
   )).orderBy(desc(memoryRelationEvidence.createdAt));
-  return c.json({ data: items.map(serializeEvidence), meta: {}, error: null });
+  return c.json({ data: items.map(serializeEvidence), meta: evidenceSourceGroups(items), error: null });
 });
 
 memoryRoutes.post('/relations/:id/evidence', requireScopes('memory:write'), requireRoles('admin', 'editor'), async (c) => {
@@ -552,15 +605,14 @@ memoryRoutes.post('/relations/:id/evidence', requireScopes('memory:write'), requ
       expected_revision: input.data.expected_revision, current_revision: relation.revision,
     }]);
   }
-  if (!await validateEvidenceReference(input.data.reference_type, input.data.reference_id, ownerId)) {
-    return errorResponse(c, 404, 'EVIDENCE_REFERENCE_NOT_FOUND', 'The evidence reference is invalid or unavailable.');
-  }
   try {
     const result = await db.transaction(async (tx) => {
+      const referenceSnapshot = await pinEvidenceReference(tx, input.data.reference_type, input.data.reference_id);
+      if (!referenceSnapshot) return null;
       const [created] = await tx.insert(memoryRelationEvidence).values({
         evidenceUid: input.data.evidence_uid, relationId: relation.id,
         evidenceType: input.data.evidence_type, referenceType: input.data.reference_type,
-        referenceId: input.data.reference_id ?? null, supports: input.data.supports,
+        referenceSnapshot, referenceId: input.data.reference_id ?? null, supports: input.data.supports,
         weight: input.data.weight, details: input.data.details, createdBy: ownerId,
       }).returning();
       const countColumn = input.data.supports ? memoryRelations.evidenceCount : memoryRelations.counterexampleCount;
@@ -575,6 +627,7 @@ memoryRoutes.post('/relations/:id/evidence', requireScopes('memory:write'), requ
       if (!updatedRelation) throw Object.assign(new Error('Relation revision conflict.'), { code: 'REVISION_CONFLICT' });
       return { created, updatedRelation };
     });
+    if (!result) return errorResponse(c, 404, 'EVIDENCE_REFERENCE_NOT_FOUND', 'The evidence reference is invalid or unavailable.');
     return c.json({ data: { evidence: serializeEvidence(result.created), relation: serializers.relation(result.updatedRelation) }, meta: {}, error: null }, 201);
   } catch (error) {
     if (error?.code === '23505') return errorResponse(c, 409, 'EVIDENCE_UID_CONFLICT', 'This evidence_uid already exists for the relation.');
