@@ -8,10 +8,11 @@ import {
   datasetSnapshotRecords,
   datasetSnapshotAssets,
   datasetSnapshots,
+  snapshotBundleJobs,
   records,
   recordVersions,
 } from '../db/schema/index.js';
-import { readBoundedObject, readObject, storeObject } from '../services/background-jobs.js';
+import { readBoundedObject, readObject, storeObject, streamObject } from '../services/background-jobs.js';
 import { createBundleFiles, SnapshotBundleError } from '../services/snapshot-bundle.js';
 import { sha256 } from '../services/import-export.js';
 
@@ -400,6 +401,75 @@ datasetRoutes.get('/:id/snapshots/:snapshotId/bundle', requireScopes('datasets:r
     }
     throw error;
   }
+});
+
+const asyncBundlePath = '/:id/snapshots/:snapshotId/bundle-job';
+const bundleReadScopes = requireScopes('datasets:read', 'records:read', 'sources:read', 'assets:read');
+const bundleReadRoles = requireRoles('admin', 'editor', 'reviewer', 'viewer');
+
+async function asyncBundleSnapshot(c) {
+  const definition = uuidSchema.parse(c.req.param('id'));
+  const snapshot = uuidSchema.parse(c.req.param('snapshotId'));
+  const [match] = await db.select({ snapshot: datasetSnapshots }).from(datasetSnapshots)
+    .innerJoin(datasetDefinitions, eq(datasetDefinitions.id, datasetSnapshots.definitionId))
+    .where(and(eq(datasetSnapshots.id, snapshot), eq(datasetDefinitions.id, definition), isNull(datasetDefinitions.deletedAt)))
+    .limit(1);
+  return match?.snapshot;
+}
+
+const serializeBundleJob = (job) => ({
+  id: job.id, snapshot_id: job.snapshotId, status: job.status,
+  attempt_count: job.attemptCount, size_bytes: job.sizeBytes, sha256: job.sha256,
+  error_message: job.errorMessage,
+});
+
+datasetRoutes.use(asyncBundlePath, bundleReadScopes, bundleReadRoles);
+datasetRoutes.use(`${asyncBundlePath}/download`, bundleReadScopes, bundleReadRoles);
+
+async function findAsyncBundleSnapshot(c, next) {
+  if (![c.req.param('id'), c.req.param('snapshotId')].every((id) => uuidSchema.safeParse(id).success)) {
+    return errorResponse(c, 400, 'VALIDATION_ERROR', 'Invalid Snapshot ID.');
+  }
+  const snapshot = await asyncBundleSnapshot(c);
+  if (!snapshot) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Snapshot was not found.');
+  c.set('bundleSnapshot', snapshot);
+  return next();
+}
+
+datasetRoutes.post(asyncBundlePath, requireScopes('datasets:write'), requireRoles('admin', 'editor'), findAsyncBundleSnapshot, async (c) => {
+  const snapshot = c.get('bundleSnapshot');
+  if (snapshot.status !== 'completed' || !snapshot.manifestHash) {
+    return errorResponse(c, 409, 'MANIFEST_NOT_READY', 'Snapshot manifest is not ready.');
+  }
+  const [updated] = await db.insert(snapshotBundleJobs).values({ snapshotId: snapshot.id })
+    .onConflictDoUpdate({
+      target: snapshotBundleJobs.snapshotId,
+      set: { status: 'queued', attemptCount: 0, errorMessage: null, nextAttemptAt: new Date() },
+      setWhere: eq(snapshotBundleJobs.status, 'failed'),
+    }).returning();
+  const job = updated ?? (await db.select().from(snapshotBundleJobs).where(eq(snapshotBundleJobs.snapshotId, snapshot.id)))[0];
+  return c.json({ data: serializeBundleJob(job), meta: {}, error: null }, job.status === 'completed' ? 200 : 202);
+});
+
+datasetRoutes.get(asyncBundlePath, findAsyncBundleSnapshot, async (c) => {
+  const [job] = await db.select().from(snapshotBundleJobs).where(eq(snapshotBundleJobs.snapshotId, c.get('bundleSnapshot').id));
+  if (!job) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'No bundle job exists.');
+  return c.json({ data: serializeBundleJob(job), meta: {}, error: null });
+});
+
+datasetRoutes.get(`${asyncBundlePath}/download`, findAsyncBundleSnapshot, async (c) => {
+  const snapshot = c.get('bundleSnapshot');
+  const [job] = await db.select().from(snapshotBundleJobs).where(eq(snapshotBundleJobs.snapshotId, snapshot.id));
+  if (job?.status !== 'completed' || !job.objectKey || !job.sha256 || !job.sizeBytes) {
+    return errorResponse(c, 409, 'BUNDLE_NOT_READY', 'The bundle has not completed.');
+  }
+  return new Response(streamObject(job.objectKey), { headers: {
+    'Content-Type': 'application/x-ndjson',
+    'Content-Disposition': `attachment; filename="snapshot-${snapshot.id}.ndjson"`,
+    'Content-Length': String(job.sizeBytes),
+    'Cache-Control': 'private, no-store',
+    'X-Content-SHA256': job.sha256,
+  } });
 });
 
 export default datasetRoutes;

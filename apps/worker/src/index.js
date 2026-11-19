@@ -1,5 +1,6 @@
 // /apps/worker/src/index.js
 import postgres from 'postgres';
+import { createSnapshotBundleQueue } from './snapshot-bundle.js';
 import { createAssetDeletionQueue } from './asset-deletion.js';
 import { memoryEventAsyncSchema, memoryEventValues } from '@sara-knowledge/domain-contracts/memory-events';
 import { normalizeImportedRecord, parseImportContent } from '@sara-knowledge/domain-contracts/record-import';
@@ -27,7 +28,13 @@ const assetDeletionQueue = createAssetDeletionQueue({
   deleteObject: (key, bucket) => new Bun.S3Client({ ...s3Config, bucket }).delete(key),
 });
 
+const snapshotBundleQueue = createSnapshotBundleQueue({
+  sql, storage: s3, leaseSeconds, retryDelaySeconds,
+  storageForBucket: (bucket) => new Bun.S3Client({ ...s3Config, bucket }),
+});
+
 async function heartbeatJob(type, job) {
+  if (type === 'snapshot-bundle') return snapshotBundleQueue.heartbeat(job);
   if (type === 'asset-deletion') return assetDeletionQueue.heartbeat(job);
   if (type === 'import') return sql`UPDATE dataset.import_jobs SET heartbeat_at=now(), lease_expires_at=now() + ${leaseSeconds} * interval '1 second' WHERE id=${job.id} AND status='processing' AND worker_id=${workerId} AND claim_generation=${job.claim_generation} RETURNING id`;
   if (type === 'export') return sql`UPDATE dataset.export_jobs SET heartbeat_at=now(), lease_expires_at=now() + ${leaseSeconds} * interval '1 second' WHERE id=${job.id} AND status='processing' AND worker_id=${workerId} AND claim_generation=${job.claim_generation} RETURNING id`;
@@ -228,6 +235,7 @@ async function processMemoryEvents(job) {
 async function reapJobs() {
   await Promise.all([
     assetDeletionQueue.reap(),
+    snapshotBundleQueue.reap(),
     sql`UPDATE dataset.import_jobs SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END, completed_at=now(), error_message=CASE WHEN cancel_requested THEN error_message ELSE COALESCE(error_message,'Maximum job attempts exhausted.') END WHERE mode='async' AND status='queued' AND (cancel_requested OR attempt_count >= max_attempts)`,
     sql`UPDATE dataset.export_jobs SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END, completed_at=now(), error_message=CASE WHEN cancel_requested THEN error_message ELSE COALESCE(error_message,'Maximum job attempts exhausted.') END WHERE mode='async' AND status='queued' AND (cancel_requested OR attempt_count >= max_attempts)`,
     sql`UPDATE memory.event_ingestion_jobs SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END, completed_at=now(), error_message=CASE WHEN cancel_requested THEN error_message ELSE COALESCE(error_message,'Maximum job attempts exhausted.') END WHERE status='queued' AND (cancel_requested OR attempt_count >= max_attempts)`,
@@ -270,6 +278,7 @@ async function checkEvidenceRevalidation() {
 }
 
 const jobQueues = [
+  snapshotBundleQueue,
   assetDeletionQueue,
   { type: 'import', claim: claimImport, process: processImport },
   { type: 'export', claim: claimExport, process: processExport },

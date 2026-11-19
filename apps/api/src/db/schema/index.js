@@ -531,6 +531,24 @@ export const datasetSnapshots = datasetSchema.table('dataset_snapshots', {
   countCheck: check('dataset_snapshots_record_count_check', sql`${table.recordCount} >= 0`),
 }));
 
+export const snapshotBundleJobs = datasetSchema.table('snapshot_bundle_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  snapshotId: uuid('snapshot_id').notNull().references(() => datasetSnapshots.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('queued'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  generation: integer('generation').notNull().default(0),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  objectKey: text('object_key'),
+  sha256: text('sha256'),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }),
+  errorMessage: text('error_message'),
+}, (table) => ({
+  snapshotUnique: uniqueIndex('snapshot_bundle_jobs_snapshot_unique').on(table.snapshotId),
+  queueIndex: index('snapshot_bundle_jobs_queue_idx').on(table.nextAttemptAt).where(sql`${table.status} = 'queued'`),
+  leaseIndex: index('snapshot_bundle_jobs_lease_idx').on(table.leaseExpiresAt).where(sql`${table.status} = 'processing'`),
+}));
+
 export const datasetSnapshotAssets = datasetSchema.table('dataset_snapshot_assets', {
   snapshotId: uuid('snapshot_id').notNull().references(() => datasetSnapshots.id, { onDelete: 'cascade' }),
   assetId: uuid('asset_id').notNull().references(() => assets.id),

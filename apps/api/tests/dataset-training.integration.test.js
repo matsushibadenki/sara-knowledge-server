@@ -197,6 +197,52 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
     await deleteObject(assetKey);
     expect((await request(bundlePath, { headers })).body.error.code).toBe('BUNDLE_OBJECT_MISSING');
 
+    if (process.env.RUN_LARGE_BUNDLE === '1') {
+      const large = Buffer.alloc(33 * 1024 * 1024, 0x41);
+      const digest = await hashBytes(large);
+      await storeObject(assetKey, large);
+      await db.update(assets).set({ sha256: digest, sizeBytes: large.length }).where(eq(assets.id, asset.id));
+      await db.insert(assetBindings).values({
+        assetId: asset.id, targetType: 'source', targetId: source.body.data.id,
+        createdBy: login.body.data.user.id,
+      });
+      const largeSnapshot = await request(`/api/v1/datasets/${definition.body.data.id}/snapshots`, {
+        method: 'POST', headers, body: '{}',
+      });
+      expect(largeSnapshot.response.status).toBe(201);
+      const largeSnapshotId = largeSnapshot.body.data.id;
+      const jobPath = `/api/v1/datasets/${definition.body.data.id}/snapshots/${largeSnapshotId}/bundle-job`;
+      scope.defer(async () => {
+        const { snapshotBundleJobs } = await import('../src/db/schema/index.js');
+        const [job] = await db.select().from(snapshotBundleJobs).where(eq(snapshotBundleJobs.snapshotId, largeSnapshotId));
+        if (job?.objectKey) await deleteObject(job.objectKey);
+        await deleteObject(largeSnapshot.body.data.manifest_object_key);
+        await db.delete(datasetSnapshots).where(eq(datasetSnapshots.id, largeSnapshotId));
+      });
+      const started = await request(jobPath, { method: 'POST', headers });
+      expect(started.response.status).toBe(202);
+      const duplicate = await request(jobPath, { method: 'POST', headers });
+      expect(duplicate.body.data.id).toBe(started.body.data.id);
+      let job;
+      for (let i = 0; i < 80; i++) {
+        job = (await request(jobPath, { headers })).body.data;
+        if (['completed', 'failed'].includes(job.status)) break;
+        await Bun.sleep(250);
+      }
+      expect(job).toMatchObject({ status: 'completed', error_message: null });
+      const downloaded = await app.request(`${jobPath}/download`, { headers });
+      expect(downloaded.status).toBe(200);
+      const hash = new Bun.CryptoHasher('sha256');
+      let count = 0;
+      for await (const chunk of downloaded.body) {
+        hash.update(chunk);
+        count += chunk.length;
+      }
+      expect(count).toBe(job.size_bytes);
+      expect(count).toBeGreaterThan(32 * 1024 * 1024);
+      expect(`sha256:${hash.digest('hex')}`).toBe(downloaded.headers.get('X-Content-SHA256'));
+    }
+
     const model = await request('/api/v1/training/models', {
       method: 'POST', headers,
       body: JSON.stringify({
@@ -302,4 +348,4 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
   } finally {
     await scope.cleanup();
   }
-});
+}, 60_000);

@@ -18,6 +18,7 @@ export async function captureBackupState(sql, bucket) {
     }
     const otherBuckets = await tx`SELECT DISTINCT bucket_name FROM dataset.assets WHERE bucket_name <> ${bucket}`;
     if (otherBuckets.length) throw new Error('Backup supports one configured bucket; other Asset buckets exist');
+    const [bundleTable] = await tx`SELECT to_regclass('dataset.snapshot_bundle_jobs') IS NOT NULL AS present`;
     const references = await tx`
       SELECT 'asset' AS kind, id::text AS id, object_key AS key, sha256 AS hash, size_bytes::text AS size,
         (status='ready' AND deleted_at IS NULL) AS required, NULL::text AS batch_uid, NULL::int AS event_count FROM dataset.assets
@@ -26,6 +27,7 @@ export async function captureBackupState(sql, bucket) {
       UNION ALL SELECT 'export',id::text,object_key,content_hash,CASE WHEN status='completed' THEN byte_size::text ELSE NULL END,status='completed',NULL,NULL FROM dataset.export_jobs WHERE object_key IS NOT NULL
       UNION ALL SELECT 'snapshot',id::text,manifest_object_key,manifest_hash,NULL,status='completed',NULL,NULL FROM dataset.dataset_snapshots WHERE manifest_object_key IS NOT NULL
       UNION ALL SELECT 'event_job',id::text,object_key,content_hash,NULL,true,batch_uid,event_count FROM memory.event_ingestion_jobs
+      ${bundleTable.present ? tx`UNION ALL SELECT 'snapshot_bundle',id::text,object_key,sha256,size_bytes::text,true,NULL,NULL FROM dataset.snapshot_bundle_jobs WHERE status='completed'` : tx``}
       ORDER BY kind,id,key`;
     const invalid = await tx`
       WITH nodes AS (

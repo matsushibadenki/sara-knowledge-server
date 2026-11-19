@@ -53,7 +53,7 @@ jobs:
         run: docker compose up -d --wait api worker
 
       - name: Run full integration suite
-        run: docker compose exec -T -e RUN_INTEGRATION=1 -e MINIO_PUBLIC_ENDPOINT=http://minio:9000 api bun test
+        run: docker compose exec -T -e RUN_INTEGRATION=1 -e RUN_LARGE_BUNDLE=1 -e MINIO_PUBLIC_ENDPOINT=http://minio:9000 api bun test
 
       - name: Verify Asset inventory and original integrity
         run: bash scripts/reconcile-assets.sh

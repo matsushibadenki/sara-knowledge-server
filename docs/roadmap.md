@@ -70,7 +70,7 @@ G1のSource revisionと出典版固定は完了し、Evidenceの参照revision�
 - 🟢 [Done] Snapshot単位で出典の訂正・撤回・旧データの不明状態を照会。新規manifestに選定ポリシー版と作成時のAsset参照・ハッシュを固定。[仕様・検証](snapshot-impact.md)。
 - 🟢 [Done] 新規Snapshotが参照するAsset原本の保持。元の紐付け解除後も削除・回収から保護。[仕様](snapshot-impact.md)。
 - 🟢 [Done] 固定したRecord／Sourceの内容とAsset原本をまとめ、SHA-256を照合する再現バンドル。[仕様・検証](snapshot-bundle.md)。
-- 🔴 [Later] 32 MiBを超える再現バンドルの非同期生成とストリーミング。
+- 🟢 [Done] 32 MiBを超える再現バンドルの非同期生成・ストリーミング取得とSHA-256検証。[大容量版の仕様](snapshot-bundle.md#大容量バンドル--large-bundles--大型复现包)。
 
 **完了条件:** v1根拠からRelationとDataset／Runを作り、v2訂正・撤回で依存先を識別できる。新しいstrict利用では古い依存先を除外し、過去Snapshotはv1利用を説明できる。過去状態が復元不能な既存データを推測で補完せず明示する。変更元→依存先の完全な再構築試験を保存する。
 

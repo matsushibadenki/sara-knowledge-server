@@ -42,6 +42,10 @@ export async function readObjectBytes(key) {
   return new Uint8Array(await s3Client().file(key).arrayBuffer());
 }
 
+export function streamObject(key) {
+  return s3Client().file(key).stream();
+}
+
 export async function readBoundedObject(key, limit, bucket) {
   const reader = s3Client(bucket).file(key).stream().getReader();
   const chunks = [];
