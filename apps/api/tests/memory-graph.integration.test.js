@@ -120,6 +120,16 @@ integrationTest('Memory graph bounds, evidence and verification revisions remain
     expect(added.body.data.evidence.reference_pin.source_revision).toBe(2);
     const history = await request(evidencePath, { headers });
     expect(history.body.data.find((item) => item.id === editorRecordEvidence.body.data.evidence.id).reference_pin).toEqual(originalPin);
+    expect(history.body.data.find((item) => item.reference_pin.source_revision === 1).stale_reason).toBe('source_revised');
+    expect(history.body.data.find((item) => item.reference_pin.source_revision === 2).stale_reason).toBeNull();
+    const jobPath = `/api/v1/memory/evidence-revalidation?source_id=${sourceId}`;
+    let jobs;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      jobs = await request(jobPath, { headers });
+      if (jobs.body.data?.[0]?.checked_at) break;
+      await Bun.sleep(250);
+    }
+    expect(jobs.body.data[0]).toMatchObject({ source_revision: 2, affected_count: 1, status: 'needs_review' });
     expect(history.body.meta.source_groups).toHaveLength(1);
     expect(history.body.meta.source_groups[0].evidence_ids).toHaveLength(2);
 
@@ -390,6 +400,12 @@ integrationTest('Memory graph bounds, evidence and verification revisions remain
     const referencedConceptDelete = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, { method: 'DELETE', headers });
     expect(referencedConceptDelete.response.status).toBe(409);
     expect(referencedConceptDelete.body.error.code).toBe('MEMORY_NODE_IN_USE');
+
+    const sourceWithdrawn = await request(`/api/v1/sources/${sourceId}`, { method: 'DELETE', headers });
+    expect(sourceWithdrawn.response.status).toBe(200);
+    const stale = await request(`/api/v1/memory/stale-evidence?source_id=${sourceId}`, { headers });
+    expect(stale.body.data).toHaveLength(2);
+    expect(stale.body.data.every((item) => item.reason === 'source_withdrawn')).toBe(true);
 
     const deletedEvent = await request(`/api/v1/memory/events/${memoryEvent.body.data.id}`, { method: 'DELETE', headers });
     expect(deletedEvent.response.status).toBe(200);

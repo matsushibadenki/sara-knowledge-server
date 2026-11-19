@@ -11,6 +11,7 @@ import { requireAuth, requireRoles, requireScopes, requireUserAuth } from '../au
 import { requireSignedApiKeyRequest } from '../auth/hmac.js';
 import { db } from '../db/client.js';
 import {
+  evidenceRevalidationJobs,
   memoryConcepts,
   memoryEntities,
   memoryEntityAliases,
@@ -608,15 +609,45 @@ function evidenceSourceGroups(items) {
   };
 }
 
+memoryRoutes.get('/stale-evidence', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const query = listSchema.extend({ source_id: uuidSchema, after_id: uuidSchema.optional() }).safeParse(c.req.query());
+  if (!query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Invalid stale Evidence query.');
+  const { source_id: sourceId, after_id: after, limit } = query.data;
+  const rows = await db.execute(sql`
+    SELECT evidence_id, relation_id, current_revision, reason
+    FROM memory.stale_source_evidence
+    WHERE source_id = ${sourceId} ${after ? sql`AND evidence_id > ${after}` : sql``}
+    ORDER BY evidence_id LIMIT ${limit + 1}`);
+  const page = rows.slice(0, limit);
+  return c.json({ data: page, meta: { next_after_id: rows.length > limit ? page.at(-1).evidence_id : null }, error: null });
+});
+
+memoryRoutes.get('/evidence-revalidation', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const query = listSchema.extend({ source_id: uuidSchema }).safeParse(c.req.query());
+  if (!query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'A Source ID is required.');
+  const rows = await db.select().from(evidenceRevalidationJobs)
+    .where(eq(evidenceRevalidationJobs.sourceId, query.data.source_id))
+    .orderBy(desc(evidenceRevalidationJobs.sourceRevision)).limit(query.data.limit);
+  return c.json({ data: rows.map((row) => ({
+    source_id: row.sourceId, source_revision: row.sourceRevision,
+    queued_at: row.queuedAt, checked_at: row.checkedAt, affected_count: row.affectedCount,
+    status: !row.checkedAt ? 'queued' : row.reviewRequired ? 'needs_review' : 'no_impact',
+  })), meta: {}, error: null });
+});
+
 memoryRoutes.get('/relations/:id/evidence', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const id = uuidSchema.safeParse(c.req.param('id'));
   if (!id.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Relation ID must be a UUID.');
   const relation = await activeResource(memoryRelations, id.data);
   if (!relation) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Relation was not found.');
-  const items = await db.select().from(memoryRelationEvidence).where(and(
-    eq(memoryRelationEvidence.relationId, relation.id),
-  )).orderBy(desc(memoryRelationEvidence.createdAt));
-  return c.json({ data: items.map(serializeEvidence), meta: evidenceSourceGroups(items), error: null });
+  const items = await db.select({
+    evidence: memoryRelationEvidence,
+    staleReason: sql`(SELECT s.reason FROM memory.stale_source_evidence s WHERE s.evidence_id = ${memoryRelationEvidence.id})`,
+  }).from(memoryRelationEvidence).where(eq(memoryRelationEvidence.relationId, relation.id))
+    .orderBy(desc(memoryRelationEvidence.createdAt));
+  return c.json({ data: items.map(({ evidence, staleReason }) => ({
+    ...serializeEvidence(evidence), stale_reason: staleReason,
+  })), meta: evidenceSourceGroups(items.map(({ evidence }) => evidence)), error: null });
 });
 
 memoryRoutes.post('/relations/:id/evidence', requireScopes('memory:write'), requireRoles('admin', 'editor'), async (c) => {
@@ -764,6 +795,7 @@ memoryRoutes.post('/traverse', requireScopes('memory:read'), requireRoles('admin
     }
     const conditions = [
       isNull(memoryRelations.deletedAt),
+      sql`NOT EXISTS (SELECT 1 FROM memory.stale_source_evidence s WHERE s.relation_id = ${memoryRelations.id})`,
       gte(memoryRelations.confidence, input.data.min_confidence),
       inArray(memoryRelations.verificationState, input.data.verification_states),
       or(isNull(memoryRelations.validFrom), lte(memoryRelations.validFrom, now)),

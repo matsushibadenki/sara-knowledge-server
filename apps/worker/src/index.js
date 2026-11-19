@@ -237,6 +237,36 @@ async function reapJobs() {
   ]);
 }
 
+// The entire check is one transaction. A crash releases the claim and leaves
+// checked_at unset, so another Worker can retry without a lease.
+async function checkEvidenceRevalidation() {
+  const rows = await sql`
+    WITH job AS (
+      SELECT source_id, source_revision
+      FROM memory.evidence_revalidation_jobs
+      WHERE checked_at IS NULL
+      ORDER BY queued_at, source_id, source_revision
+      LIMIT 1 FOR UPDATE SKIP LOCKED
+    ), affected AS (
+      SELECT e.relation_id
+      FROM job
+      JOIN memory.relation_evidence e ON e.reference_snapshot->'pin'->>'source_id' = job.source_id::text
+      WHERE (e.reference_snapshot->'pin'->>'source_revision')::integer < job.source_revision
+    ), demoted AS (
+      UPDATE memory.relations r SET verification_state = 'candidate', updated_at = now()
+      WHERE r.deleted_at IS NULL AND r.verification_state IN ('verified', 'rejected')
+        AND r.id IN (SELECT relation_id FROM affected)
+    ), count AS (
+      SELECT count(*)::integer AS total FROM affected
+    )
+    UPDATE memory.evidence_revalidation_jobs j
+    SET checked_at = now(), affected_count = count.total, review_required = count.total > 0
+    FROM job, count
+    WHERE j.source_id = job.source_id AND j.source_revision = job.source_revision
+    RETURNING j.source_id`;
+  return rows.length > 0;
+}
+
 const jobQueues = [
   assetDeletionQueue,
   { type: 'import', claim: claimImport, process: processImport },
@@ -278,6 +308,7 @@ async function run() {
         }
       }
 
+      const checkedEvidence = await checkEvidenceRevalidation();
       let claimed = false;
       for (let offset = 0; offset < jobQueues.length; offset += 1) {
         const queueIndex = (queueCursor + offset) % jobQueues.length;
@@ -289,7 +320,7 @@ async function run() {
         await withHeartbeat(queue.type, job, () => queue.process(job));
         break;
       }
-      if (claimed) continue;
+      if (claimed || checkedEvidence) continue;
       if (runOnce) break;
     } catch (error) {
       console.error(JSON.stringify({ level: 'error', service: 'worker', message: error.message }));

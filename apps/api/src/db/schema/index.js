@@ -890,6 +890,7 @@ export const memoryRelationEvidence = memorySchema.table('relation_evidence', {
   createdBy: uuid('created_by').notNull().references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
+  pinnedSourceIndex: index('memory_evidence_pinned_source_idx').on(sql`(${table.referenceSnapshot}->'pin'->>'source_id')`),
   relationUidUnique: uniqueIndex('memory_relation_evidence_relation_uid_unique').on(table.relationId, table.evidenceUid),
   relationTimelineIndex: index('memory_relation_evidence_relation_timeline_idx').on(table.relationId, table.createdAt),
   referenceIndex: index('memory_relation_evidence_reference_idx').on(table.referenceType, table.referenceId),
@@ -897,6 +898,18 @@ export const memoryRelationEvidence = memorySchema.table('relation_evidence', {
   weightCheck: check('memory_relation_evidence_weight_check', sql`${table.weight} > 0`),
   referenceTypeCheck: check('memory_relation_evidence_reference_type_check', sql`${table.referenceType} IN ('source', 'record', 'event', 'experience', 'entity', 'concept', 'dataset_snapshot', 'model', 'external')`),
   referencePresenceCheck: check('memory_relation_evidence_reference_presence_check', sql`(${table.referenceType} = 'external' AND ${table.referenceId} IS NULL) OR (${table.referenceType} <> 'external' AND ${table.referenceId} IS NOT NULL)`),
+}));
+
+export const evidenceRevalidationJobs = memorySchema.table('evidence_revalidation_jobs', {
+  sourceId: uuid('source_id').notNull().references(() => sources.id, { onDelete: 'cascade' }),
+  sourceRevision: integer('source_revision').notNull(),
+  queuedAt: timestamp('queued_at', { withTimezone: true }).notNull().defaultNow(),
+  checkedAt: timestamp('checked_at', { withTimezone: true }),
+  affectedCount: integer('affected_count'),
+  reviewRequired: boolean('review_required'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.sourceId, table.sourceRevision] }),
+  pending: index('evidence_revalidation_pending_idx').on(table.queuedAt).where(sql`${table.checkedAt} IS NULL`),
 }));
 
 export const memoryVerificationDecisions = memorySchema.table('verification_decisions', {
