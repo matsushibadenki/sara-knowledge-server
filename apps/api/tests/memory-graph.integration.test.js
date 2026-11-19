@@ -366,6 +366,27 @@ integrationTest('Memory graph bounds, evidence and verification revisions remain
     const viewerMemoryRead = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, { headers: viewerHeaders });
     expect(viewerMemoryRead.response.status).toBe(200);
 
+    const relationPath = `/api/v1/memory/relations/${editorRecordRelation.body.data.id}`;
+    const correctedRelation = await request(relationPath, {
+      method: 'PATCH', headers: editorHeaders, body: JSON.stringify({
+        expected_revision: added.body.data.relation.revision,
+        valid_from: '2020-01-01T00:00:00Z', context: { locale: 'ja' },
+      }),
+    });
+    expect(correctedRelation.response.status).toBe(200);
+    const withdrawn = await request(relationPath, { method: 'DELETE', headers: editorHeaders });
+    expect(withdrawn.response.status).toBe(200);
+    expect((await request(relationPath, { headers })).response.status).toBe(404);
+    const latest = await request(`${relationPath}/revisions?limit=1`, { headers });
+    expect(latest.body.data[0]).toMatchObject({
+      retracted: true, supersedes_revision: correctedRelation.body.data.revision,
+    });
+    const previous = await request(`${relationPath}/revisions?before_revision=${latest.body.meta.next_before_revision}`, { headers });
+    expect(previous.body.data[0]).toMatchObject({ retracted: false, snapshot: { context: { locale: 'ja' } } });
+    expect(Date.parse(previous.body.data[0].snapshot.valid_from)).toBe(Date.parse('2020-01-01T00:00:00Z'));
+    expect(Date.parse(previous.body.data[0].recorded_at)).toBeGreaterThan(Date.parse('2020-01-01T00:00:00Z'));
+    expect(previous.body.data.at(-1).snapshot.valid_from).toBeNull();
+
     const referencedConceptDelete = await request(`/api/v1/memory/concepts/${concept.body.data.id}`, { method: 'DELETE', headers });
     expect(referencedConceptDelete.response.status).toBe(409);
     expect(referencedConceptDelete.body.error.code).toBe('MEMORY_NODE_IN_USE');

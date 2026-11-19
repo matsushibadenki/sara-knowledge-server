@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   memoryEventAsyncSchema,
@@ -20,6 +20,7 @@ import {
   memoryExperiences,
   memoryRelationEvidence,
   memoryRelations,
+  memoryRelationRevisions,
   memoryVerificationDecisions,
   sources,
   recordVersions,
@@ -475,6 +476,31 @@ registerCrud({
     if (!await validateNode(targetType, targetId, ownerId)) return { status: 404, code: 'TARGET_NODE_NOT_FOUND', message: 'The active workspace target node was not found.' };
     return null;
   },
+});
+
+memoryRoutes.get('/relations/:id/revisions', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const id = uuidSchema.safeParse(c.req.param('id'));
+  const query = listSchema.extend({ before_revision: z.coerce.number().int().positive().max(2147483647).optional() }).safeParse(c.req.query());
+  if (!id.success || !query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Invalid Relation revision query.');
+  const { limit, before_revision: before } = query.data;
+  const rows = await db.select().from(memoryRelationRevisions).where(and(
+    eq(memoryRelationRevisions.relationId, id.data),
+    before === undefined ? undefined : lt(memoryRelationRevisions.revision, before),
+  )).orderBy(desc(memoryRelationRevisions.revision)).limit(limit + 1);
+  if (!rows.length && before === undefined) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Relation was not found.');
+  const page = rows.slice(0, limit);
+  return c.json({
+    data: page.map((row) => ({
+      revision: row.revision,
+      recorded_at: row.recordedAt,
+      origin: row.origin,
+      supersedes_revision: row.origin === 'captured' && row.revision > 1 ? row.revision - 1 : null,
+      retracted: row.snapshot.deleted_at != null,
+      snapshot: row.snapshot,
+    })),
+    meta: { next_before_revision: rows.length > limit ? page.at(-1).revision : null },
+    error: null,
+  });
 });
 
 function normalizeAlias(value) {

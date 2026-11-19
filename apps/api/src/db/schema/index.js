@@ -866,6 +866,16 @@ export const memoryRelations = memorySchema.table('relations', {
   revisionCheck: check('memory_relations_revision_check', sql`${table.revision} > 0`),
 }));
 
+export const memoryRelationRevisions = memorySchema.table('relation_revisions', {
+  relationId: uuid('relation_id').notNull().references(() => memoryRelations.id, { onDelete: 'cascade' }),
+  revision: integer('revision').notNull(),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+  origin: text('origin').notNull().default('captured'),
+  snapshot: jsonb('snapshot').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.relationId, table.revision] }),
+}));
+
 export const memoryRelationEvidence = memorySchema.table('relation_evidence', {
   referenceSnapshot: jsonb('reference_snapshot'),
   id: uuid('id').defaultRandom().primaryKey(),
