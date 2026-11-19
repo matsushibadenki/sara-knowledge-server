@@ -292,6 +292,8 @@ export const recordVersions = datasetSchema.table('record_versions', {
   sourceRevisionFk: foreignKey({ columns: [table.sourceId, table.sourceRevision], foreignColumns: [sourceRevisions.sourceId, sourceRevisions.revision], name: 'record_versions_source_revision_fk' }),
   sourceRevisionIndex: index('record_versions_source_revision_idx').on(table.sourceId, table.sourceRevision),
   sourcePinCheck: check('record_versions_source_pin_check', sql`(${table.sourcePinState}='pinned' AND ${table.sourceId} IS NOT NULL AND ${table.sourceRevision} IS NOT NULL) OR (${table.sourcePinState}='none' AND ${table.sourceId} IS NULL AND ${table.sourceRevision} IS NULL) OR (${table.sourcePinState}='legacy_unknown' AND ${table.sourceRevision} IS NULL)`),
+  lexicalIndex: index('record_versions_lexical_idx').using('gin', sql`(lower(normalize(coalesce(${table.contextSnapshot}->>'title','') || ' ' || coalesce(${table.plainText},'') || ' ' || ${table.content}::text, NFKC))) gin_trgm_ops`)
+    .where(sql`${table.isCurrent} AND ${table.deletedAt} IS NULL`),
   recordVersionUnique: uniqueIndex('record_versions_record_version_unique')
     .on(table.recordId, table.versionNumber),
   oneCurrentVersionPerRecord: uniqueIndex('record_versions_one_current_unique')
@@ -881,6 +883,8 @@ export const memoryRelations = memorySchema.table('relations', {
     .on(table.sourceType, table.sourceId, table.createdAt).where(sql`${table.deletedAt} IS NULL`),
   activeTargetIndex: index('memory_relations_active_target_idx')
     .on(table.targetType, table.targetId, table.createdAt).where(sql`${table.deletedAt} IS NULL`),
+  lexicalIndex: index('memory_relations_lexical_idx').using('gin', sql`(lower(normalize(${table.relationType} || ' ' || ${table.context}::text || ' ' || ${table.payload}::text, NFKC))) gin_trgm_ops`)
+    .where(sql`${table.deletedAt} IS NULL`),
   relationTypeIndex: index('memory_relations_type_idx').on(table.relationType, table.createdAt),
   strengthCheck: check('memory_relations_strength_check', sql`${table.strength} BETWEEN 0 AND 1`),
   confidenceCheck: check('memory_relations_confidence_check', sql`${table.confidence} BETWEEN 0 AND 1`),

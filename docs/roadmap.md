@@ -74,10 +74,10 @@ G1のSource revisionと出典版固定は完了し、Evidenceの参照revision�
 
 **完了条件:** v1根拠からRelationとDataset／Runを作り、v2訂正・撤回で依存先を識別できる。新しいstrict利用では古い依存先を除外し、過去Snapshotはv1利用を説明できる。過去状態が復元不能な既存データを推測で補完せず明示する。変更元→依存先の完全な再構築試験を保存する。
 
-## G2 — 検索と利用による価値実証（G1完了後）
+## G2 — 検索と利用による価値実証（現在の着手対象）
 
-- 🔴 [Later] 三言語の字句検索baseline、cursor pagination、候補／確定知識の検索契約
-- 🔴 [Later] chunk／EmbeddingをRecord revision・encoder版へ固定。pgvector検索＋字句検索の比較
+- 🟢 [Done] 三言語の字句検索、カーソルページ送り、候補／確定知識の分離。確定検索は照会時に出典版と失効を判定。[仕様・検証](lexical-search.md)。
+- 🟠 [Next] chunk／EmbeddingをRecord revision・encoder版へ固定。pgvector検索＋字句検索の比較
 - 🔴 [Later] bounded traversalの省略理由・上限・タイムアウト、必要な根拠を返すretrieval API
 - 🔴 [Later] API schema／response／errorのOpenAPI契約と、回答context取得・学習bundle取得の2クライアント
 - 🔴 [Later] 最小の検索・出典・差分・レビュー画面を日本語／English／简体中文で実装

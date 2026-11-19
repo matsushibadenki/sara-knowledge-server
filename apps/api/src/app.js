@@ -11,6 +11,7 @@ import { exportRoutes, importRoutes } from './routes/import-export.js';
 import datasetRoutes from './routes/datasets.js';
 import trainingRoutes from './routes/training.js';
 import memoryRoutes from './routes/memory.js';
+import searchRoutes from './routes/search.js';
 import assetRoutes from './routes/assets.js';
 
 const app = new Hono();
@@ -327,6 +328,7 @@ app.route('/training', trainingRoutes);
 app.route('/api/v1/training', trainingRoutes);
 app.route('/memory', memoryRoutes);
 app.route('/api/v1/memory', memoryRoutes);
+app.route('/api/v1/search', searchRoutes);
 app.route('/assets', assetRoutes);
 app.route('/api/v1/assets', assetRoutes);
 app.route('/sources', sourcesRoutes);
