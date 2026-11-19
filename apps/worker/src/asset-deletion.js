@@ -22,7 +22,7 @@ export function createAssetDeletionQueue({ sql, deleteObject, workerId, leaseSec
         if (current.reason === 'staging') {
           if (asset.staging_object_key !== current.object_key || (asset.status !== 'ready' && !asset.deleted_at)) throw new Error('Asset staging object is still in use.');
         } else {
-          const bindings = await tx`SELECT id FROM dataset.asset_bindings WHERE asset_id=${asset.id} LIMIT 1`;
+          const bindings = await tx`SELECT asset_id FROM dataset.asset_bindings WHERE asset_id=${asset.id} UNION ALL SELECT asset_id FROM dataset.dataset_snapshot_assets WHERE asset_id=${asset.id} LIMIT 1`;
           if (!asset.deleted_at || bindings.length || ![asset.object_key, asset.staging_object_key].includes(current.object_key)) throw new Error('Referenced or active Asset cannot be purged.');
         }
         await deleteObject(current.object_key, current.bucket_name);

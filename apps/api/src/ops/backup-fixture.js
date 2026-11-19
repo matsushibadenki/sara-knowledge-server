@@ -70,8 +70,8 @@ try {
     if (id.importJob) { await sql`DELETE FROM dataset.import_items WHERE import_job_id=${id.importJob}`; await sql`DELETE FROM dataset.import_jobs WHERE id=${id.importJob}`; }
     if (id.relation) { await sql`DELETE FROM memory.relation_evidence WHERE relation_id=${id.relation}`; await sql`DELETE FROM memory.relations WHERE id=${id.relation}`; }
     if (id.entity) await sql`DELETE FROM memory.entities WHERE id=${id.entity}`;
-    if (id.asset) { await sql`DELETE FROM dataset.asset_deletion_jobs WHERE asset_id=${id.asset}`; await sql`DELETE FROM dataset.asset_bindings WHERE asset_id=${id.asset}`; await sql`DELETE FROM dataset.assets WHERE id=${id.asset}`; }
     if (id.snapshot) { await sql`DELETE FROM dataset.dataset_snapshot_records WHERE snapshot_id=${id.snapshot}`; await sql`DELETE FROM dataset.dataset_snapshots WHERE id=${id.snapshot}`; }
+    if (id.asset) { await sql`DELETE FROM dataset.asset_deletion_jobs WHERE asset_id=${id.asset}`; await sql`DELETE FROM dataset.asset_bindings WHERE asset_id=${id.asset}`; await sql`DELETE FROM dataset.assets WHERE id=${id.asset}`; }
     if (id.definition) await sql`DELETE FROM dataset.dataset_definitions WHERE id=${id.definition}`;
     if (id.record) {
       await sql`DELETE FROM dataset.record_reviews WHERE record_id=${id.record}`;

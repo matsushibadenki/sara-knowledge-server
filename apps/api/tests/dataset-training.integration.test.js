@@ -119,6 +119,9 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
     expect(snapshot.body.data.manifest_hash).toStartWith('sha256:');
 
     await db.delete(assetBindings).where(eq(assetBindings.id, binding.id));
+    const blockedDeletion = await request(`/api/v1/assets/${asset.id}`, { method: 'DELETE', headers });
+    expect(blockedDeletion.response.status).toBe(409);
+    expect(blockedDeletion.body.error.code).toBe('ASSET_SNAPSHOT_IN_USE');
     const impactPath = `/api/v1/datasets/${definition.body.data.id}/snapshots/${snapshot.body.data.id}/impact`;
     expect((await request(impactPath, { headers })).body.data).toEqual([]);
     const sourceChanged = await request(`/api/v1/sources/${source.body.data.id}`, {

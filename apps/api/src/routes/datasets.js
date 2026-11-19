@@ -6,6 +6,7 @@ import { db } from '../db/client.js';
 import {
   datasetDefinitions,
   datasetSnapshotRecords,
+  datasetSnapshotAssets,
   datasetSnapshots,
   records,
   recordVersions,
@@ -201,13 +202,20 @@ datasetRoutes.post('/:id/snapshots', requireScopes('datasets:write'), requireRol
         JOIN dataset.assets a ON a.id = b.asset_id
         WHERE a.status = 'ready' AND a.deleted_at IS NULL
         ORDER BY b.target_type, b.target_id, b.id
-        LIMIT ${MAX_SNAPSHOT_RECORDS + 1}`);
+        LIMIT ${MAX_SNAPSHOT_RECORDS + 1} FOR SHARE OF a`);
       if (dependencies.length > MAX_SNAPSHOT_RECORDS) {
         throw Object.assign(new Error('Too many Asset bindings for a synchronous snapshot.'), { code: 'SNAPSHOT_TOO_LARGE' });
+      }
+      const assetIds = [...new Set(dependencies.map((item) => item.asset_id))];
+      if (assetIds.length) {
+        await tx.insert(datasetSnapshotAssets).values(assetIds.map((assetId) => ({ snapshotId, assetId })));
       }
       return { snapshot: created, rows: selectedRows, dependencies };
     }, { isolationLevel: 'repeatable read' });
   } catch (error) {
+    if (['40001', '40P01'].includes(error?.code ?? error?.cause?.code)) {
+      return errorResponse(c, 409, 'SNAPSHOT_CONFLICT', 'Snapshot inputs changed concurrently. Retry creation.');
+    }
     if (error?.code === 'SNAPSHOT_TOO_LARGE') return errorResponse(c, 413, 'SNAPSHOT_TOO_LARGE', error.message);
     throw error;
   }
@@ -221,9 +229,19 @@ datasetRoutes.post('/:id/snapshots', requireScopes('datasets:write'), requireRol
     }).where(eq(datasetSnapshots.id, snapshot.id)).returning();
     return c.json({ data: serializeSnapshot(completed), meta: {}, error: null }, 201);
   } catch (error) {
-    const [failed] = await db.update(datasetSnapshots).set({ status: 'failed', errorMessage: String(error.message || error).slice(0, 2000), completedAt: new Date() })
-      .where(eq(datasetSnapshots.id, snapshot.id)).returning();
-    return c.json({ data: serializeSnapshot(failed), meta: {}, error: null }, 502);
+    const outcome = await db.transaction(async (tx) => {
+      const [failed] = await tx.update(datasetSnapshots)
+        .set({ status: 'failed', errorMessage: String(error.message || error).slice(0, 2000), completedAt: new Date() })
+        .where(and(eq(datasetSnapshots.id, snapshot.id), eq(datasetSnapshots.status, 'building'))).returning();
+      if (failed) {
+        await tx.delete(datasetSnapshotAssets).where(eq(datasetSnapshotAssets.snapshotId, snapshot.id));
+        return failed;
+      }
+      const [existing] = await tx.select().from(datasetSnapshots).where(eq(datasetSnapshots.id, snapshot.id));
+      return existing;
+    });
+    if (!outcome) throw error;
+    return c.json({ data: serializeSnapshot(outcome), meta: {}, error: null }, outcome.status === 'completed' ? 201 : 502);
   }
 });
 

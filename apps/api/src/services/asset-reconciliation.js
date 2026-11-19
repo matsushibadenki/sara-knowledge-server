@@ -51,7 +51,7 @@ export async function reconcileAssets({ sql, bucket, statObject, readObjectBytes
             if (job.reason === 'staging') {
               if (current.staging_object_key !== key || (current.status !== 'ready' && !current.deleted_at)) return false;
             } else {
-              const refs = await tx`SELECT id FROM dataset.asset_bindings WHERE asset_id=${asset.id} LIMIT 1`;
+              const refs = await tx`SELECT asset_id FROM dataset.asset_bindings WHERE asset_id=${asset.id} UNION ALL SELECT asset_id FROM dataset.dataset_snapshot_assets WHERE asset_id=${asset.id} LIMIT 1`;
               if (!current.deleted_at || refs.length || ![current.object_key, current.staging_object_key].includes(key)) return false;
             }
             const changed = await tx`UPDATE dataset.asset_deletion_jobs SET status='queued', attempt_count=0, completed_at=NULL, next_attempt_at=now(), error_message='Object reappeared after completed deletion.' WHERE id=${job.id} AND status='completed' AND not_before <= now() RETURNING id`;

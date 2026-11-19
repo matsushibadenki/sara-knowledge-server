@@ -3,7 +3,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireAuth, requireRoles, requireScopes } from '../auth/middleware.js';
 import { db } from '../db/client.js';
-import { assetBindings, assetDeletionJobs, assets } from '../db/schema/index.js';
+import { assetBindings, assetDeletionJobs, assets, datasetSnapshotAssets } from '../db/schema/index.js';
 import { hashBytes, presignObject, readObjectBytes, statObject, storeObject } from '../services/background-jobs.js';
 import { ASSET_URL_SECONDS, scheduleAssetDeletion, serializeDeletionJob } from '../services/asset-retention.js';
 import { findAccessibleResource } from '../services/resource-access.js';
@@ -204,12 +204,16 @@ assetRoutes.delete('/:id', requireScopes('assets:write'), requireRoles('admin', 
     // Even soft-deleted targets keep their references for later restoration.
     const bindings = await tx.select({ id: assetBindings.id }).from(assetBindings).where(eq(assetBindings.assetId, asset.id)).limit(1);
     if (bindings.length) return { retained: true };
+    const [snapshotPin] = await tx.select({ snapshotId: datasetSnapshotAssets.snapshotId })
+      .from(datasetSnapshotAssets).where(eq(datasetSnapshotAssets.assetId, asset.id)).limit(1);
+    if (snapshotPin) return { snapshotRetained: true };
     const now = new Date();
     const [deleted] = await tx.update(assets).set({ deletedAt: now, updatedAt: now }).where(eq(assets.id, asset.id)).returning();
     await scheduleAssetDeletion(tx, deleted, 'deleted_asset', now);
     return { asset: deleted, replayed: false };
   });
   if (result.missing) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Asset was not found.');
+  if (result.snapshotRetained) return errorResponse(c, 409, 'ASSET_SNAPSHOT_IN_USE', 'This Asset is retained by a Dataset Snapshot.');
   if (result.retained) return errorResponse(c, 409, 'ASSET_IN_USE', 'Detach all Asset bindings before deletion; references are retained even for deleted targets.');
   return c.json({ data: serializeAsset(result.asset), meta: { replayed: result.replayed, deletion_queued: true }, error: null });
 });

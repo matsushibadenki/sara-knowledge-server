@@ -531,6 +531,14 @@ export const datasetSnapshots = datasetSchema.table('dataset_snapshots', {
   countCheck: check('dataset_snapshots_record_count_check', sql`${table.recordCount} >= 0`),
 }));
 
+export const datasetSnapshotAssets = datasetSchema.table('dataset_snapshot_assets', {
+  snapshotId: uuid('snapshot_id').notNull().references(() => datasetSnapshots.id, { onDelete: 'cascade' }),
+  assetId: uuid('asset_id').notNull().references(() => assets.id),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.snapshotId, table.assetId] }),
+  assetIndex: index('dataset_snapshot_assets_asset_idx').on(table.assetId),
+}));
+
 export const datasetSnapshotRecords = datasetSchema.table('dataset_snapshot_records', {
   snapshotId: uuid('snapshot_id').notNull().references(() => datasetSnapshots.id, { onDelete: 'cascade' }),
   recordId: uuid('record_id').notNull().references(() => records.id),
