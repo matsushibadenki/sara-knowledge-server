@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import app from '../src/app.js';
 import { db } from '../src/db/client.js';
 import {
-  auditLogs, datasetDefinitions, datasetSnapshotRecords, datasetSnapshots, recordVersions, records,
+  assets, assetBindings, auditLogs, datasetDefinitions, datasetSnapshotRecords, datasetSnapshots, recordVersions, records,
   refreshTokens, sources, trainingMetrics, trainingModels, trainingRuns,
 } from '../src/db/schema/index.js';
 import { hashSecret } from '../src/auth/secrets.js';
@@ -87,6 +87,16 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
     });
     expect(duplicateDefinition.response.status).toBe(409);
 
+    const [asset] = await db.insert(assets).values({
+      bucketName: 'fixture', objectKey: `snapshot-fixture/${crypto.randomUUID()}`,
+      originalFilename: 'fixture.txt', mimeType: 'text/plain', sizeBytes: 4,
+      sha256: 'a'.repeat(64), status: 'ready', createdBy: login.body.data.user.id,
+    }).returning();
+    scope.defer(() => db.delete(assets).where(eq(assets.id, asset.id)));
+    const [binding] = await db.insert(assetBindings).values({
+      assetId: asset.id, targetType: 'source', targetId: source.body.data.id,
+      createdBy: login.body.data.user.id,
+    }).returning();
     const snapshot = await request(`/api/v1/datasets/${definition.body.data.id}/snapshots`, {
       method: 'POST', headers, body: '{}',
     });
@@ -108,10 +118,21 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
     expect(snapshot.body.data.record_count).toBe(3);
     expect(snapshot.body.data.manifest_hash).toStartWith('sha256:');
 
+    await db.delete(assetBindings).where(eq(assetBindings.id, binding.id));
+    const impactPath = `/api/v1/datasets/${definition.body.data.id}/snapshots/${snapshot.body.data.id}/impact`;
+    expect((await request(impactPath, { headers })).body.data).toEqual([]);
     const sourceChanged = await request(`/api/v1/sources/${source.body.data.id}`, {
       method: 'PATCH', headers, body: JSON.stringify({ expected_revision: 1, title: 'Corrected source after snapshot' }),
     });
     expect(sourceChanged.body.data.revision).toBe(2);
+    const impact = await request(`${impactPath}?limit=1`, { headers });
+    expect(impact.response.status).toBe(200);
+    expect(impact.body.data[0]).toMatchObject({ ordinal: 1, source_revision: 1, current_source_revision: 2, reason: 'source_revised' });
+    const nextImpact = await request(`${impactPath}?after_ordinal=${impact.body.meta.next_after_ordinal}`, { headers });
+    expect(nextImpact.body.data.map((item) => item.ordinal)).toEqual([2, 3]);
+    expect((await request(`/api/v1/sources/${source.body.data.id}`, { method: 'DELETE', headers })).response.status).toBe(200);
+    expect((await request(impactPath, { headers })).body.data.map((item) => item.reason))
+      .toEqual(['source_withdrawn', 'source_withdrawn', 'source_withdrawn']);
     const detailBefore = await request(
       `/api/v1/datasets/${definition.body.data.id}/snapshots/${snapshot.body.data.id}`, { headers },
     );
@@ -134,6 +155,11 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
     expect(manifest.status).toBe(200);
     expect(manifest.headers.get('X-Content-SHA256')).toBe(snapshot.body.data.manifest_hash);
     const manifestText = await manifest.text();
+    expect(JSON.parse(manifestText.split('\n')[0])).toMatchObject({
+      schema: 'sara.dataset-manifest/1.2',
+      selection_policy: 'dataset-selection/1',
+      asset_bindings_at_creation: [{ asset_id: asset.id, sha256: asset.sha256, size_bytes: '4' }],
+    });
     const manifestEntries = manifestText.split('\n').filter(Boolean).map((line) => JSON.parse(line)).filter((line) => line.type === 'record');
     expect(manifestEntries).toHaveLength(3);
     for (const entry of manifestEntries) {

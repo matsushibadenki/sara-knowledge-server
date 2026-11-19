@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, asc, desc, eq, gte, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireAuth, requireRoles, requireScopes } from '../auth/middleware.js';
 import { db } from '../db/client.js';
@@ -65,9 +65,11 @@ async function activeDefinition(id) {
   return item;
 }
 
-function formatManifest(snapshot, definition, rows) {
+function formatManifest(snapshot, definition, rows, dependencies) {
   const metadata = {
-    schema: 'sara.dataset-manifest/1.1', snapshot_id: snapshot.id,
+    schema: 'sara.dataset-manifest/1.2',
+    selection_policy: 'dataset-selection/1',
+    asset_bindings_at_creation: dependencies, snapshot_id: snapshot.id,
     definition_id: definition.id, definition_revision: definition.updatedAt.toISOString(),
     created_at: snapshot.createdAt.toISOString(), filters: definition.filters,
     record_count: rows.length,
@@ -182,16 +184,37 @@ datasetRoutes.post('/:id/snapshots', requireScopes('datasets:write'), requireRol
       if (selectedRows.length) await tx.insert(datasetSnapshotRecords).values(selectedRows.map(({ record, version }, index) => ({
         snapshotId, recordId: record.id, recordVersionId: version.id, ordinal: index + 1, createdAt: now,
       })));
-      return { snapshot: created, rows: selectedRows };
-    });
+      const dependencies = await tx.execute(sql`
+        WITH targets AS (
+          SELECT 'record' AS type, m.record_id AS id
+          FROM dataset.dataset_snapshot_records m WHERE m.snapshot_id = ${snapshotId}
+          UNION
+          SELECT 'source', v.source_id
+          FROM dataset.dataset_snapshot_records m
+          JOIN dataset.record_versions v ON v.id = m.record_version_id
+          WHERE m.snapshot_id = ${snapshotId} AND v.source_revision IS NOT NULL
+        )
+        SELECT b.target_type, b.target_id, b.role, a.id AS asset_id,
+               a.sha256, a.size_bytes::text AS size_bytes, a.mime_type
+        FROM targets t
+        JOIN dataset.asset_bindings b ON b.target_type = t.type AND b.target_id = t.id
+        JOIN dataset.assets a ON a.id = b.asset_id
+        WHERE a.status = 'ready' AND a.deleted_at IS NULL
+        ORDER BY b.target_type, b.target_id, b.id
+        LIMIT ${MAX_SNAPSHOT_RECORDS + 1}`);
+      if (dependencies.length > MAX_SNAPSHOT_RECORDS) {
+        throw Object.assign(new Error('Too many Asset bindings for a synchronous snapshot.'), { code: 'SNAPSHOT_TOO_LARGE' });
+      }
+      return { snapshot: created, rows: selectedRows, dependencies };
+    }, { isolationLevel: 'repeatable read' });
   } catch (error) {
     if (error?.code === 'SNAPSHOT_TOO_LARGE') return errorResponse(c, 413, 'SNAPSHOT_TOO_LARGE', error.message);
     throw error;
   }
-  const { snapshot, rows } = frozen;
+  const { snapshot, rows, dependencies } = frozen;
   const objectKey = `datasets/${c.get('auth').sub}/${definition.id}/${snapshot.id}/manifest.${snapshot.manifestFormat}`;
   try {
-    const manifest = formatManifest(snapshot, definition, rows);
+    const manifest = formatManifest(snapshot, definition, rows, dependencies);
     await storeObject(objectKey, manifest, snapshot.manifestFormat === 'jsonl' ? 'application/x-ndjson' : 'application/json');
     const [completed] = await db.update(datasetSnapshots).set({
       status: 'completed', manifestObjectKey: objectKey, manifestHash: await sha256(manifest), completedAt: new Date(),
@@ -214,6 +237,36 @@ datasetRoutes.get('/:id/snapshots/:snapshotId', requireScopes('datasets:read'), 
   if (!snapshot) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Dataset snapshot was not found.');
   const members = await db.select().from(datasetSnapshotRecords).where(eq(datasetSnapshotRecords.snapshotId, snapshot.id)).orderBy(asc(datasetSnapshotRecords.ordinal));
   return c.json({ data: { ...serializeSnapshot(snapshot), records: members.map((item) => ({ ordinal: item.ordinal, record_id: item.recordId, record_version_id: item.recordVersionId })) }, meta: {}, error: null });
+});
+
+datasetRoutes.get('/:id/snapshots/:snapshotId/impact', requireScopes('datasets:read', 'sources:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const id = uuidSchema.safeParse(c.req.param('id'));
+  const snapshotId = uuidSchema.safeParse(c.req.param('snapshotId'));
+  const query = listSchema.extend({
+    after_ordinal: z.coerce.number().int().min(0).max(MAX_SNAPSHOT_RECORDS).default(0),
+  }).safeParse(c.req.query());
+  if (!id.success || !snapshotId.success || !query.success) {
+    return errorResponse(c, 400, 'VALIDATION_ERROR', 'Invalid Snapshot impact query.');
+  }
+  const [snapshot] = await db.select({ id: datasetSnapshots.id }).from(datasetSnapshots)
+    .innerJoin(datasetDefinitions, eq(datasetDefinitions.id, datasetSnapshots.definitionId))
+    .where(and(eq(datasetSnapshots.id, snapshotId.data), eq(datasetDefinitions.id, id.data), isNull(datasetDefinitions.deletedAt))).limit(1);
+  if (!snapshot) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Dataset snapshot was not found.');
+  const { limit, after_ordinal: after } = query.data;
+  const rows = await db.execute(sql`
+    SELECT m.ordinal, m.record_id, m.record_version_id, v.source_id,
+           v.source_revision, s.revision AS current_source_revision,
+           CASE WHEN v.source_pin_state = 'legacy_unknown' THEN 'legacy_unknown'
+                WHEN s.deleted_at IS NOT NULL THEN 'source_withdrawn'
+                ELSE 'source_revised' END AS reason
+    FROM dataset.dataset_snapshot_records m
+    JOIN dataset.record_versions v ON v.id = m.record_version_id
+    LEFT JOIN dataset.sources s ON s.id = v.source_id
+    WHERE m.snapshot_id = ${snapshot.id} AND m.ordinal > ${after}
+      AND (v.source_pin_state = 'legacy_unknown' OR s.deleted_at IS NOT NULL OR s.revision <> v.source_revision)
+    ORDER BY m.ordinal LIMIT ${limit + 1}`);
+  const page = rows.slice(0, limit);
+  return c.json({ data: page, meta: { next_after_ordinal: rows.length > limit ? page.at(-1).ordinal : null }, error: null });
 });
 
 datasetRoutes.get('/:id/snapshots/:snapshotId/manifest', requireScopes('datasets:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
