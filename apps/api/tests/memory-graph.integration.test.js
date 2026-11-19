@@ -133,6 +133,28 @@ integrationTest('Memory graph bounds, evidence and verification revisions remain
     expect(history.body.meta.source_groups).toHaveLength(1);
     expect(history.body.meta.source_groups[0].evidence_ids).toHaveLength(2);
 
+    const reviewPath = `/api/v1/memory/verification/relation/${editorRecordRelation.body.data.id}`;
+    const review = (revision) => request(reviewPath, { method: 'POST', headers, body: JSON.stringify({
+      expected_revision: revision, expected_state: 'candidate', state: 'verified',
+    }) });
+    expect((await review(added.body.data.relation.revision)).body.error.code).toBe('STALE_EVIDENCE');
+    const replacement = await request(evidencePath, {
+      method: 'POST', headers: editorHeaders, body: JSON.stringify({
+        expected_revision: added.body.data.relation.revision,
+        supersedes_evidence_id: editorRecordEvidence.body.data.evidence.id,
+        evidence_uid: crypto.randomUUID(), evidence_type: 'record',
+        reference_type: 'record', reference_id: recordId, supports: true,
+      }),
+    });
+    expect(replacement.response.status).toBe(201);
+    expect(replacement.body.data.relation.evidence_count).toBe(2);
+    const completedReview = await review(replacement.body.data.relation.revision);
+    expect(completedReview.response.status).toBe(200);
+    expect(completedReview.body.data.decision.target_snapshot.reviewed_evidence.map((e) => e.evidence_id))
+      .toContain(replacement.body.data.evidence.id);
+    const impact = await request(`/api/v1/memory/source-impact?kind=relation&source_id=${sourceId}`, { headers });
+    expect(impact.body.data).toContainEqual({ id: editorRecordRelation.body.data.id });
+
     const editorCanReferenceWorkspaceMemory = await request('/api/v1/memory/relations', {
       method: 'POST', headers: editorHeaders,
       body: JSON.stringify({
@@ -379,7 +401,7 @@ integrationTest('Memory graph bounds, evidence and verification revisions remain
     const relationPath = `/api/v1/memory/relations/${editorRecordRelation.body.data.id}`;
     const correctedRelation = await request(relationPath, {
       method: 'PATCH', headers: editorHeaders, body: JSON.stringify({
-        expected_revision: added.body.data.relation.revision,
+        expected_revision: completedReview.body.data.revision,
         valid_from: '2020-01-01T00:00:00Z', context: { locale: 'ja' },
       }),
     });

@@ -66,8 +66,8 @@ G1のSource revisionと出典版固定は完了し、Evidenceの参照revision�
 - 🟢 [Done] Evidenceの参照版を登録時に固定。出典IDごとのグループと同一内容hashを一覧で表示。[検証記録](evidence-reference-pins.md)。
 - 🟢 [Done] Relationの有効期間と記録時刻を区別し、訂正・撤回・文脈と反証件数を版履歴に保存。[Relationの時間履歴](relation-time-history.md)。
 - 🟢 [Done] Source版変更のtransactional outbox、Evidence失効判定、Graph探索からの除外、Worker再検証Job。[仕様](evidence-revalidation.md)。
-- 🟠 [Next] 失効Evidenceの差し替えと再レビュー完了、下流依存関係と取消の利用trace
-- 🔴 [Later] 不変Snapshotの影響表示、Source／Asset／policy版を含む再現bundle
+- 🟢 [Done] 失効Evidenceの差し替え、再レビュー完了記録、保存済み参照によるRelation／Snapshot／Training Runの影響追跡。[仕様・検証](evidence-revalidation.md)。
+- 🟠 [Next] 不変Snapshotの影響表示、Source／Asset／policy版を含む再現bundle
 
 **完了条件:** v1根拠からRelationとDataset／Runを作り、v2訂正・撤回で依存先を識別できる。新しいstrict利用では古い依存先を除外し、過去Snapshotはv1利用を説明できる。過去状態が復元不能な既存データを推測で補完せず明示する。変更元→依存先の完全な再構築試験を保存する。
 

@@ -878,6 +878,7 @@ export const memoryRelationRevisions = memorySchema.table('relation_revisions', 
 
 export const memoryRelationEvidence = memorySchema.table('relation_evidence', {
   referenceSnapshot: jsonb('reference_snapshot'),
+  supersedesEvidenceId: uuid('supersedes_evidence_id'),
   id: uuid('id').defaultRandom().primaryKey(),
   evidenceUid: text('evidence_uid').notNull(),
   relationId: uuid('relation_id').notNull().references(() => memoryRelations.id, { onDelete: 'cascade' }),
@@ -890,6 +891,8 @@ export const memoryRelationEvidence = memorySchema.table('relation_evidence', {
   createdBy: uuid('created_by').notNull().references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
+  replacementUnique: uniqueIndex('memory_evidence_replacement_unique').on(table.supersedesEvidenceId),
+  replacementFk: foreignKey({ columns: [table.supersedesEvidenceId], foreignColumns: [table.id], name: 'memory_evidence_replacement_fk' }),
   pinnedSourceIndex: index('memory_evidence_pinned_source_idx').on(sql`(${table.referenceSnapshot}->'pin'->>'source_id')`),
   relationUidUnique: uniqueIndex('memory_relation_evidence_relation_uid_unique').on(table.relationId, table.evidenceUid),
   relationTimelineIndex: index('memory_relation_evidence_relation_timeline_idx').on(table.relationId, table.createdAt),

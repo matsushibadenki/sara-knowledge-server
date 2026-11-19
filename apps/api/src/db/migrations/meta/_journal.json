@@ -232,6 +232,13 @@
       "when": 1795061181684,
       "tag": "0032_slow_gorilla_man",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795061772290,
+      "tag": "0033_hot_scarlet_spider",
+      "breakpoints": true
     }
   ]
 }

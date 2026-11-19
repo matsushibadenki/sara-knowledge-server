@@ -252,10 +252,12 @@ async function checkEvidenceRevalidation() {
       FROM job
       JOIN memory.relation_evidence e ON e.reference_snapshot->'pin'->>'source_id' = job.source_id::text
       WHERE (e.reference_snapshot->'pin'->>'source_revision')::integer < job.source_revision
+        AND NOT EXISTS (SELECT 1 FROM memory.relation_evidence next WHERE next.supersedes_evidence_id = e.id)
     ), demoted AS (
       UPDATE memory.relations r SET verification_state = 'candidate', updated_at = now()
       WHERE r.deleted_at IS NULL AND r.verification_state IN ('verified', 'rejected')
         AND r.id IN (SELECT relation_id FROM affected)
+        AND r.updated_at <= (SELECT queued_at FROM memory.evidence_revalidation_jobs j JOIN job USING (source_id, source_revision))
     ), count AS (
       SELECT count(*)::integer AS total FROM affected
     )

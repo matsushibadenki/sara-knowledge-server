@@ -190,6 +190,12 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
       });
     }
     expect(run.response.status).toBe(201);
+    for (const [kind, id] of [['snapshot', snapshot.body.data.id], ['training_run', run.body.data.id]]) {
+      const impact = await request(`/api/v1/memory/source-impact?kind=${kind}&source_id=${source.body.data.id}`, { headers });
+      expect(impact.response.status).toBe(200);
+      expect(impact.body.data).toContainEqual({ id });
+    }
+
     expect(run.body.data.status).toBe('queued');
     expect(run.body.data.dataset_snapshot_id).toBe(snapshot.body.data.id);
     expect(run.body.data.model_snapshot.model_version).toBe('1.0');

@@ -113,6 +113,7 @@ const aliasSchema = z.object({
 });
 const evidenceSchema = z.object({
   expected_revision: z.number().int().positive(),
+  supersedes_evidence_id: uuidSchema.optional(),
   evidence_uid: z.string().trim().min(1).max(200),
   evidence_type: z.string().trim().min(1).max(200),
   reference_type: z.enum(['source', 'record', 'event', 'experience', 'entity', 'concept', 'dataset_snapshot', 'model', 'external']),
@@ -164,7 +165,7 @@ const serializers = {
   relation: (item) => ({ ...common(item), relation_uid: item.relationUid, source_type: item.sourceType, source_id: item.sourceId, relation_type: item.relationType, target_type: item.targetType, target_id: item.targetId, strength: item.strength, confidence: item.confidence, evidence_count: item.evidenceCount, counterexample_count: item.counterexampleCount, min_delay_ms: item.minDelayMs, max_delay_ms: item.maxDelayMs, valid_from: item.validFrom, valid_until: item.validUntil, expires_at: item.expiresAt, verification_state: item.verificationState, proposal_source: item.proposalSource, context: item.context, payload: item.payload }),
 };
 const serializeAlias = (item) => ({ ...common(item), entity_id: item.entityId, alias: item.alias, normalized_alias: item.normalizedAlias, language_code: item.languageCode, alias_type: item.aliasType, confidence: item.confidence, proposal_source: item.proposalSource, verification_state: item.verificationState });
-const serializeEvidence = (item) => ({ id: item.id, evidence_uid: item.evidenceUid, relation_id: item.relationId, evidence_type: item.evidenceType, reference_type: item.referenceType, reference_id: item.referenceId, reference_pin: item.referenceSnapshot?.pin ?? null, supports: item.supports, weight: item.weight, details: item.details, created_by: item.createdBy, created_at: item.createdAt });
+const serializeEvidence = (item) => ({ id: item.id, evidence_uid: item.evidenceUid, supersedes_evidence_id: item.supersedesEvidenceId, relation_id: item.relationId, evidence_type: item.evidenceType, reference_type: item.referenceType, reference_id: item.referenceId, reference_pin: item.referenceSnapshot?.pin ?? null, supports: item.supports, weight: item.weight, details: item.details, created_by: item.createdBy, created_at: item.createdAt });
 const serializeDecision = (item) => ({ id: item.id, target_type: item.targetType, target_id: item.targetId, target_revision: item.targetRevision, target_snapshot: item.targetSnapshot, from_state: item.fromState, to_state: item.toState, notes: item.notes, metadata: item.metadata, decided_by: item.decidedBy, created_at: item.createdAt });
 const serializeEventJob = (item) => ({
   id: item.id, batch_uid: item.batchUid, content_hash: item.contentHash, status: item.status,
@@ -609,13 +610,41 @@ function evidenceSourceGroups(items) {
   };
 }
 
+memoryRoutes.get('/source-impact', requireScopes('memory:read', 'sources:read', 'datasets:read', 'training:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const query = listSchema.extend({
+    source_id: uuidSchema,
+    kind: z.enum(['relation', 'snapshot', 'training_run']),
+    after_id: uuidSchema.optional(),
+  }).safeParse(c.req.query());
+  if (!query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Invalid Source impact query.');
+  const { source_id: sourceId, kind, after_id: after, limit } = query.data;
+  const downstream = {
+    relation: sql`SELECT relation_id AS id FROM memory.stale_source_evidence WHERE source_id = ${sourceId}`,
+    snapshot: sql`SELECT snapshot_id AS id FROM affected_snapshots`,
+    training_run: sql`SELECT r.id FROM training.runs r JOIN affected_snapshots a ON a.snapshot_id = r.dataset_snapshot_id`,
+  };
+  const rows = await db.execute(sql`
+    WITH affected_snapshots AS (
+      SELECT DISTINCT m.snapshot_id
+      FROM dataset.sources s
+      JOIN dataset.record_versions v ON v.source_id = s.id
+      JOIN dataset.dataset_snapshot_records m ON m.record_version_id = v.id
+      WHERE s.id = ${sourceId} AND (s.deleted_at IS NOT NULL OR v.source_revision <> s.revision)
+    )
+    SELECT DISTINCT id FROM (${downstream[kind]}) impacted
+    ${after ? sql`WHERE id > ${after}` : sql``}
+    ORDER BY id LIMIT ${limit + 1}`);
+  const page = rows.slice(0, limit);
+  return c.json({ data: page, meta: { kind, next_after_id: rows.length > limit ? page.at(-1).id : null }, error: null });
+});
+
 memoryRoutes.get('/stale-evidence', requireScopes('memory:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
   const query = listSchema.extend({ source_id: uuidSchema, after_id: uuidSchema.optional() }).safeParse(c.req.query());
   if (!query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Invalid stale Evidence query.');
   const { source_id: sourceId, after_id: after, limit } = query.data;
   const rows = await db.execute(sql`
     SELECT evidence_id, relation_id, current_revision, reason
-    FROM memory.stale_source_evidence
+    FROM memory.active_stale_source_evidence
     WHERE source_id = ${sourceId} ${after ? sql`AND evidence_id > ${after}` : sql``}
     ORDER BY evidence_id LIMIT ${limit + 1}`);
   const page = rows.slice(0, limit);
@@ -642,12 +671,13 @@ memoryRoutes.get('/relations/:id/evidence', requireScopes('memory:read'), requir
   if (!relation) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Relation was not found.');
   const items = await db.select({
     evidence: memoryRelationEvidence,
+    replaced: sql`EXISTS (SELECT 1 FROM memory.relation_evidence replacement WHERE replacement.supersedes_evidence_id = ${memoryRelationEvidence.id})`,
     staleReason: sql`(SELECT s.reason FROM memory.stale_source_evidence s WHERE s.evidence_id = ${memoryRelationEvidence.id})`,
   }).from(memoryRelationEvidence).where(eq(memoryRelationEvidence.relationId, relation.id))
     .orderBy(desc(memoryRelationEvidence.createdAt));
-  return c.json({ data: items.map(({ evidence, staleReason }) => ({
-    ...serializeEvidence(evidence), stale_reason: staleReason,
-  })), meta: evidenceSourceGroups(items.map(({ evidence }) => evidence)), error: null });
+  return c.json({ data: items.map(({ evidence, staleReason, replaced }) => ({
+    ...serializeEvidence(evidence), stale_reason: staleReason, replaced,
+  })), meta: evidenceSourceGroups(items.filter(({ replaced }) => !replaced).map(({ evidence }) => evidence)), error: null });
 });
 
 memoryRoutes.post('/relations/:id/evidence', requireScopes('memory:write'), requireRoles('admin', 'editor'), async (c) => {
@@ -666,15 +696,29 @@ memoryRoutes.post('/relations/:id/evidence', requireScopes('memory:write'), requ
     const result = await db.transaction(async (tx) => {
       const referenceSnapshot = await pinEvidenceReference(tx, input.data.reference_type, input.data.reference_id);
       if (!referenceSnapshot) return null;
+      let previous;
+      const predecessor = input.data.supersedes_evidence_id;
+      if (predecessor) {
+        const [stale] = await tx.execute(sql`
+          SELECT e.supports FROM memory.active_stale_source_evidence s
+          JOIN memory.relation_evidence e ON e.id = s.evidence_id
+          WHERE s.relation_id = ${relation.id} AND s.evidence_id = ${predecessor}`);
+        if (!stale || !referenceSnapshot.pin.source_id) return { replacementConflict: true };
+        const [source] = await tx.select().from(sources).where(eq(sources.id, referenceSnapshot.pin.source_id)).for('share');
+        if (!source || source.deletedAt || source.revision !== referenceSnapshot.pin.source_revision) return { replacementConflict: true };
+        previous = stale;
+      }
       const [created] = await tx.insert(memoryRelationEvidence).values({
         evidenceUid: input.data.evidence_uid, relationId: relation.id,
         evidenceType: input.data.evidence_type, referenceType: input.data.reference_type,
-        referenceSnapshot, referenceId: input.data.reference_id ?? null, supports: input.data.supports,
+        supersedesEvidenceId: predecessor, referenceSnapshot, referenceId: input.data.reference_id ?? null, supports: input.data.supports,
         weight: input.data.weight, details: input.data.details, createdBy: ownerId,
       }).returning();
-      const countColumn = input.data.supports ? memoryRelations.evidenceCount : memoryRelations.counterexampleCount;
+      const supportsDelta = Number(input.data.supports) - Number(previous?.supports === true);
+      const countersDelta = Number(!input.data.supports) - Number(previous?.supports === false);
       const [updatedRelation] = await tx.update(memoryRelations).set({
-        [input.data.supports ? 'evidenceCount' : 'counterexampleCount']: sql`${countColumn} + 1`,
+        evidenceCount: sql`${memoryRelations.evidenceCount} + ${supportsDelta}`,
+        counterexampleCount: sql`${memoryRelations.counterexampleCount} + ${countersDelta}`,
         verificationState: ['verified', 'rejected'].includes(relation.verificationState) ? 'candidate' : relation.verificationState,
         revision: sql`${memoryRelations.revision} + 1`, updatedAt: new Date(),
       }).where(and(
@@ -684,9 +728,11 @@ memoryRoutes.post('/relations/:id/evidence', requireScopes('memory:write'), requ
       if (!updatedRelation) throw Object.assign(new Error('Relation revision conflict.'), { code: 'REVISION_CONFLICT' });
       return { created, updatedRelation };
     });
+    if (result?.replacementConflict) return errorResponse(c, 409, 'EVIDENCE_REPLACEMENT_CONFLICT', 'The predecessor must be active stale evidence and the replacement must pin a current Source.');
     if (!result) return errorResponse(c, 404, 'EVIDENCE_REFERENCE_NOT_FOUND', 'The evidence reference is invalid or unavailable.');
     return c.json({ data: { evidence: serializeEvidence(result.created), relation: serializers.relation(result.updatedRelation) }, meta: {}, error: null }, 201);
   } catch (error) {
+    if (error?.constraint_name === 'memory_evidence_replacement_unique') return errorResponse(c, 409, 'EVIDENCE_REPLACEMENT_CONFLICT', 'The predecessor was already replaced.');
     if (error?.code === '23505') return errorResponse(c, 409, 'EVIDENCE_UID_CONFLICT', 'This evidence_uid already exists for the relation.');
     if (error?.code === 'REVISION_CONFLICT') {
       const latest = await activeResource(memoryRelations, relation.id);
@@ -739,6 +785,25 @@ memoryRoutes.post('/verification/:type/:id', requireScopes('memory:verify'), req
   }
   if (target.verificationState !== input.data.expected_state) return errorResponse(c, 409, 'VERIFICATION_STATE_CONFLICT', 'The verification state changed concurrently.');
   const result = await db.transaction(async (tx) => {
+    let reviewedEvidence;
+    if (type.data === 'relation' && input.data.state !== 'candidate') {
+      // Serialize the review with edits to any Source supplying active evidence.
+      await tx.execute(sql`
+        SELECT s.id FROM dataset.sources s
+        WHERE EXISTS (
+          SELECT 1 FROM memory.relation_evidence e
+          WHERE e.relation_id = ${target.id}
+            AND e.reference_snapshot->'pin'->>'source_id' = s.id::text
+            AND NOT EXISTS (SELECT 1 FROM memory.relation_evidence next WHERE next.supersedes_evidence_id = e.id)
+        ) ORDER BY s.id FOR SHARE`);
+      const [stale] = await tx.execute(sql`SELECT 1 FROM memory.active_stale_source_evidence WHERE relation_id = ${target.id} LIMIT 1`);
+      if (stale) return { stale: true };
+      reviewedEvidence = await tx.execute(sql`
+        SELECT e.id AS evidence_id, e.supersedes_evidence_id, e.reference_snapshot->'pin' AS reference_pin
+        FROM memory.relation_evidence e WHERE e.relation_id = ${target.id}
+          AND NOT EXISTS (SELECT 1 FROM memory.relation_evidence next WHERE next.supersedes_evidence_id = e.id)
+        ORDER BY e.id`);
+    }
     const [updated] = await tx.update(table).set({
       verificationState: input.data.state, revision: sql`${table.revision} + 1`, updatedAt: new Date(),
     }).where(and(
@@ -749,12 +814,13 @@ memoryRoutes.post('/verification/:type/:id', requireScopes('memory:verify'), req
     const snapshot = type.data === 'entity_alias' ? serializeAlias(updated) : serializers[type.data](updated);
     const [decision] = await tx.insert(memoryVerificationDecisions).values({
       targetType: type.data, targetId: target.id, fromState: input.data.expected_state,
-      toState: input.data.state, targetRevision: updated.revision, targetSnapshot: snapshot,
+      toState: input.data.state, targetRevision: updated.revision, targetSnapshot: reviewedEvidence ? { ...snapshot, reviewed_evidence: reviewedEvidence } : snapshot,
       notes: input.data.notes ?? null,
       metadata: input.data.metadata, decidedBy: ownerId,
     }).returning();
     return { updated, decision };
   });
+  if (result?.stale) return errorResponse(c, 409, 'STALE_EVIDENCE', 'Replace stale evidence before completing review.');
   if (!result) {
     const latest = await activeResource(table, target.id);
     if (latest?.revision !== input.data.expected_revision) {
@@ -795,7 +861,7 @@ memoryRoutes.post('/traverse', requireScopes('memory:read'), requireRoles('admin
     }
     const conditions = [
       isNull(memoryRelations.deletedAt),
-      sql`NOT EXISTS (SELECT 1 FROM memory.stale_source_evidence s WHERE s.relation_id = ${memoryRelations.id})`,
+      sql`NOT EXISTS (SELECT 1 FROM memory.active_stale_source_evidence s WHERE s.relation_id = ${memoryRelations.id})`,
       gte(memoryRelations.confidence, input.data.min_confidence),
       inArray(memoryRelations.verificationState, input.data.verification_states),
       or(isNull(memoryRelations.validFrom), lte(memoryRelations.validFrom, now)),
