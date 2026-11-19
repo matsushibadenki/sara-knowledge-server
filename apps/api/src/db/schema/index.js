@@ -4,6 +4,7 @@ import {
   boolean,
   check,
   doublePrecision,
+  foreignKey,
   index,
   inet,
   integer,
@@ -133,6 +134,7 @@ export const apiRequestNonces = authSchema.table('api_request_nonces', {
 }));
 
 export const sources = datasetSchema.table('sources', {
+  revision: integer('revision').notNull().default(1),
   id: uuid('id').defaultRandom().primaryKey(),
   sourceType: text('source_type').notNull(),
   title: text('title'),
@@ -159,6 +161,17 @@ export const sources = datasetSchema.table('sources', {
     'sources_source_type_check',
     sql`${table.sourceType} IN ('manual', 'website', 'document', 'book', 'dataset', 'conversation', 'sensor', 'generated', 'imported', 'wordpress')`,
   ),
+}));
+
+export const sourceRevisions = datasetSchema.table('source_revisions', {
+  sourceId: uuid('source_id').notNull().references(() => sources.id, { onDelete: 'cascade' }),
+  revision: integer('revision').notNull(),
+  snapshot: jsonb('snapshot').notNull(),
+  origin: text('origin').notNull().default('captured'),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.sourceId, table.revision] }),
+  originCheck: check('source_revisions_origin_check', sql`${table.origin} IN ('captured','migration_baseline')`),
 }));
 
 export const assets = datasetSchema.table('assets', {
@@ -259,6 +272,10 @@ export const records = datasetSchema.table('records', {
 }));
 
 export const recordVersions = datasetSchema.table('record_versions', {
+  sourceId: uuid('source_id'),
+  sourceRevision: integer('source_revision'),
+  sourcePinState: text('source_pin_state').notNull().default('legacy_unknown'),
+  contextSnapshot: jsonb('context_snapshot'),
   id: uuid('id').defaultRandom().primaryKey(),
   recordId: uuid('record_id').notNull().references(() => records.id),
   versionNumber: integer('version_number').notNull(),
@@ -272,6 +289,9 @@ export const recordVersions = datasetSchema.table('record_versions', {
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   isCurrent: boolean('is_current').notNull().default(false),
 }, (table) => ({
+  sourceRevisionFk: foreignKey({ columns: [table.sourceId, table.sourceRevision], foreignColumns: [sourceRevisions.sourceId, sourceRevisions.revision], name: 'record_versions_source_revision_fk' }),
+  sourceRevisionIndex: index('record_versions_source_revision_idx').on(table.sourceId, table.sourceRevision),
+  sourcePinCheck: check('record_versions_source_pin_check', sql`(${table.sourcePinState}='pinned' AND ${table.sourceId} IS NOT NULL AND ${table.sourceRevision} IS NOT NULL) OR (${table.sourcePinState}='none' AND ${table.sourceId} IS NULL AND ${table.sourceRevision} IS NULL) OR (${table.sourcePinState}='legacy_unknown' AND ${table.sourceRevision} IS NULL)`),
   recordVersionUnique: uniqueIndex('record_versions_record_version_unique')
     .on(table.recordId, table.versionNumber),
   oneCurrentVersionPerRecord: uniqueIndex('record_versions_one_current_unique')

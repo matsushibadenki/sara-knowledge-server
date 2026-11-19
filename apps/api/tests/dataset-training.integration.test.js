@@ -108,6 +108,10 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
     expect(snapshot.body.data.record_count).toBe(3);
     expect(snapshot.body.data.manifest_hash).toStartWith('sha256:');
 
+    const sourceChanged = await request(`/api/v1/sources/${source.body.data.id}`, {
+      method: 'PATCH', headers, body: JSON.stringify({ expected_revision: 1, title: 'Corrected source after snapshot' }),
+    });
+    expect(sourceChanged.body.data.revision).toBe(2);
     const detailBefore = await request(
       `/api/v1/datasets/${definition.body.data.id}/snapshots/${snapshot.body.data.id}`, { headers },
     );
@@ -130,6 +134,14 @@ integrationTest('Snapshot membership and Training Run model version stay fixed a
     expect(manifest.status).toBe(200);
     expect(manifest.headers.get('X-Content-SHA256')).toBe(snapshot.body.data.manifest_hash);
     const manifestText = await manifest.text();
+    const manifestEntries = manifestText.split('\n').filter(Boolean).map((line) => JSON.parse(line)).filter((line) => line.type === 'record');
+    expect(manifestEntries).toHaveLength(3);
+    for (const entry of manifestEntries) {
+      expect(entry.source_id).toBe(source.body.data.id);
+      expect(entry.source_revision).toBe(1);
+      expect(entry.source_pin_state).toBe('pinned');
+      expect(entry.context_snapshot.language_code).toBe(language);
+    }
     expect(manifestText).toContain(frozenMember.record_version_id);
     expect(manifestText).not.toContain(revised.body.data.current_version_id);
 

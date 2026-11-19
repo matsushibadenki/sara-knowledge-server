@@ -56,6 +56,9 @@ async function withImportExportFixture(run) {
       const record = await request(`/api/v1/records/${item.record_id}`, { headers });
       expect(record.response.status).toBe(200);
       expect(record.body.data.status).toBe('draft');
+      expect(record.body.data.current_version.source_pin_state).toBe('pinned');
+      expect(record.body.data.current_version.source_revision).toBe(1);
+      expect(record.body.data.current_version.context_snapshot.record_type).toBe(record.body.data.record_type);
     }
   }
   try {

@@ -3,7 +3,7 @@ import { and, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireAuth, requireRoles, requireScopes } from '../auth/middleware.js';
 import { db } from '../db/client.js';
-import { records, sources } from '../db/schema/index.js';
+import { records, sources, sourceRevisions } from '../db/schema/index.js';
 import {
   appendAuditLog,
   changedFields,
@@ -32,8 +32,8 @@ const sourceInputSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-const sourcePatchSchema = sourceInputSchema.partial().refine(
-  (value) => Object.keys(value).length > 0,
+const sourcePatchSchema = sourceInputSchema.partial().extend({ expected_revision: z.number().int().positive().optional() }).refine(
+  (value) => Object.keys(value).some((key) => key !== 'expected_revision'),
   { message: 'At least one source field must be provided.' },
 );
 
@@ -54,6 +54,7 @@ export function serializeSource(source) {
   if (!source) return null;
   return {
     id: source.id,
+    revision: source.revision,
     source_type: source.sourceType,
     title: source.title,
     url: source.url,
@@ -192,6 +193,26 @@ sourcesRoutes.get('/:id', requireScopes('sources:read'), requireRoles('admin', '
   });
 });
 
+sourcesRoutes.get('/:id/revisions', requireScopes('sources:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const id = uuidSchema.safeParse(c.req.param('id'));
+  const query = listQuerySchema.safeParse({ page: c.req.query('page'), limit: c.req.query('limit') });
+  if (!id.success || !query.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Invalid Source revision query.');
+  if (!await findSource(id.data, true)) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Source was not found.');
+  const { page, limit } = query.data;
+  const items = await db.select().from(sourceRevisions).where(eq(sourceRevisions.sourceId, id.data))
+    .orderBy(desc(sourceRevisions.revision)).limit(limit).offset((page-1)*limit);
+  return c.json({ data: items.map((r) => ({ source_id: r.sourceId, revision: r.revision, snapshot: r.snapshot, origin: r.origin, recorded_at: r.recordedAt })), meta: { page, limit }, error: null });
+});
+
+sourcesRoutes.get('/:id/revisions/:revision', requireScopes('sources:read'), requireRoles('admin', 'editor', 'reviewer', 'viewer'), async (c) => {
+  const id = uuidSchema.safeParse(c.req.param('id'));
+  const revision = z.coerce.number().int().positive().safeParse(c.req.param('revision'));
+  if (!id.success || !revision.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Invalid Source revision.');
+  const [item] = await db.select().from(sourceRevisions).where(and(eq(sourceRevisions.sourceId,id.data),eq(sourceRevisions.revision,revision.data))).limit(1);
+  if (!item) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Source revision was not found.');
+  return c.json({ data: { source_id: item.sourceId, revision: item.revision, snapshot: item.snapshot, origin: item.origin, recorded_at: item.recordedAt }, meta: {}, error: null });
+});
+
 sourcesRoutes.patch('/:id', requireScopes('sources:write'), requireRoles('admin', 'editor'), async (c) => {
   const idResult = uuidSchema.safeParse(c.req.param('id'));
   if (!idResult.success) return errorResponse(c, 400, 'VALIDATION_ERROR', 'Source ID must be a UUID.');
@@ -208,6 +229,7 @@ sourcesRoutes.patch('/:id', requireScopes('sources:write'), requireRoles('admin'
       .limit(1)
       .for('update');
     if (!current) return null;
+    if (result.data.expected_revision !== undefined && result.data.expected_revision !== current.revision) return { conflict: true, revision: current.revision };
     const [source] = await tx.update(sources)
       .set({ ...sourceValues(result.data), updatedAt: now })
       .where(eq(sources.id, current.id))
@@ -227,6 +249,7 @@ sourcesRoutes.patch('/:id', requireScopes('sources:write'), requireRoles('admin'
   });
   if (!outcome) return errorResponse(c, 404, 'RESOURCE_NOT_FOUND', 'Source was not found.');
 
+  if (outcome.conflict) return errorResponse(c, 409, 'REVISION_CONFLICT', 'Source revision has changed.', [{ current_revision: outcome.revision }]);
   return c.json({ data: serializeSource(outcome), meta: {}, error: null });
 });
 

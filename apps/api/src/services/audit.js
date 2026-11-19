@@ -13,6 +13,7 @@ export function sourceAuditSnapshot(source) {
   if (!source) return null;
   return {
     id: source.id,
+    revision: source.revision,
     source_type: source.sourceType,
     title: source.title,
     url: source.url,
@@ -40,6 +41,8 @@ export function recordAuditSnapshot(record, version = null) {
     status: record.status,
     current_version_id: record.currentVersionId,
     current_version_number: version?.versionNumber ?? null,
+    source_revision: version?.sourceRevision ?? null,
+    source_pin_state: version?.sourcePinState ?? null,
     schema_version: version?.schemaVersion ?? null,
     language_code: record.languageCode,
     quality_score: record.qualityScore,

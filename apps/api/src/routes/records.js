@@ -83,6 +83,10 @@ function serializeRecord(record, version = null, source = undefined) {
       current_version: {
         id: version.id,
         version_number: version.versionNumber,
+        source_id: version.sourceId,
+        source_revision: version.sourceRevision,
+        source_pin_state: version.sourcePinState,
+        context_snapshot: version.contextSnapshot,
         schema_version: version.schemaVersion,
         content: version.content,
         plain_text: version.plainText,
@@ -99,6 +103,10 @@ function serializeVersion(version) {
     id: version.id,
     record_id: version.recordId,
     version_number: version.versionNumber,
+    source_id: version.sourceId,
+    source_revision: version.sourceRevision,
+    source_pin_state: version.sourcePinState,
+    context_snapshot: version.contextSnapshot,
     schema_version: version.schemaVersion,
     content: version.content,
     plain_text: version.plainText,
@@ -122,7 +130,7 @@ async function findSource(sourceId, executor = db, lock = false) {
     .from(sources)
     .where(and(eq(sources.id, sourceId), isNull(sources.deletedAt)))
     .limit(1);
-  if (lock) query = query.for('key share');
+  if (lock) query = query.for('share');
   const [source] = await query;
   return source;
 }
@@ -334,6 +342,17 @@ recordsRoutes.patch('/:id', requireScopes('records:write'), requireRoles('admin'
       id: nextVersionId,
       recordId: record.id,
       versionNumber: currentVersion.versionNumber + 1,
+      sourceId: input.source_id === undefined ? currentVersion.sourceId : (input.source_id ?? null),
+      sourceRevision: input.source_id === undefined ? currentVersion.sourceRevision : (source?.revision ?? null),
+      sourcePinState: input.source_id === undefined ? currentVersion.sourcePinState : (source ? 'pinned' : 'none'),
+      contextSnapshot: {
+        record_type: input.record_type ?? record.recordType,
+        title: input.title === undefined ? record.title : input.title,
+        language_code: input.language_code === undefined ? record.languageCode : input.language_code,
+        metadata: input.metadata === undefined ? record.metadata : input.metadata,
+        quality_score: input.quality_score === undefined ? record.qualityScore : input.quality_score,
+        confidence: input.confidence === undefined ? record.confidence : input.confidence,
+      },
       schemaVersion: input.schema_version || currentVersion.schemaVersion,
       content: input.content === undefined ? currentVersion.content : input.content,
       plainText: input.plain_text === undefined ? currentVersion.plainText : input.plain_text,

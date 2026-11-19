@@ -67,17 +67,19 @@ async function activeDefinition(id) {
 
 function formatManifest(snapshot, definition, rows) {
   const metadata = {
-    schema: 'sara.dataset-manifest/1.0', snapshot_id: snapshot.id,
+    schema: 'sara.dataset-manifest/1.1', snapshot_id: snapshot.id,
     definition_id: definition.id, definition_revision: definition.updatedAt.toISOString(),
     created_at: snapshot.createdAt.toISOString(), filters: definition.filters,
     record_count: rows.length,
   };
   const entries = rows.map(({ record, version }, index) => ({
     ordinal: index + 1, record_id: record.id, record_version_id: version.id,
-    version_number: version.versionNumber, record_type: record.recordType,
-    status: record.status, language_code: record.languageCode,
-    quality_score: record.qualityScore, confidence: record.confidence,
-    source_id: record.sourceId, schema_version: version.schemaVersion,
+    version_number: version.versionNumber, record_type: version.contextSnapshot?.record_type ?? null,
+    status: record.status, language_code: version.contextSnapshot?.language_code ?? null,
+    quality_score: version.contextSnapshot?.quality_score ?? null, confidence: version.contextSnapshot?.confidence ?? null,
+    source_id: version.sourceId, source_revision: version.sourceRevision,
+    source_pin_state: version.sourcePinState, context_snapshot: version.contextSnapshot,
+    schema_version: version.schemaVersion,
   }));
   if (snapshot.manifestFormat === 'json') return JSON.stringify({ ...metadata, records: entries }, null, 2);
   return `${[JSON.stringify({ type: 'manifest', ...metadata }), ...entries.map((entry) => JSON.stringify({ type: 'record', ...entry }))].join('\n')}\n`;

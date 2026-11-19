@@ -1,6 +1,6 @@
 # Roadmap
 
-更新: 2026-10-22。[設計評価と方針](database-direction-review-2026-09-05.md)に基づく。進捗と実装順序の正本は本書。過去のprogress文書と[改訂前の全項目](roadmap-archive-2026-09-05.md)は履歴であり、そこにあるNextは現在の着手指示ではない。
+更新: 2026-11-19。[設計評価と方針](database-direction-review-2026-09-05.md)に基づく。進捗と実装順序の正本は本書。過去のprogress文書と[改訂前の全項目](roadmap-archive-2026-09-05.md)は履歴であり、そこにあるNextは現在の着手指示ではない。
 
 - 🟢 `[Done]` implemented in the current codebase
 - 🟠 `[Next]` high-priority unfinished work
@@ -52,18 +52,18 @@ English: G0.3b is complete. Record provenance and quality Review, Memory synchro
 - 🟢 [Done] **G0.4b 実kill試験:** 隔離DB／object storeと実Workerを使い、Importの行transaction、Exportのobject保存後の完了UPDATE、Memory Eventの一括INSERT中にSIGKILL。部分結果のrollback、自然なlease切れからの再claim、欠落・重複防止、最終参照・byte／hashを検証。CIへ追加。[検証記録](worker-crash-recovery-progress-2026-10-22.md)。
 - ⭕️ [Pending] 本番provider・別物理host・実権限・実データ量でのDB＋object復元とRPO／RTO測定。
 
-English: Referenced Assets are retained, including references to soft-deleted targets. After explicit detachment, logical deletion and durable jobs commit together; originals remain for 24 hours by default. Staging cleanup waits for signed-URL expiry plus grace. PostgreSQL polling, fenced claims, retries and lease recovery are verified. Asset inventory and integrity reconciliation now report unowned keys, missing/corrupt originals and storage errors. Opt-in apply reopens only completed deletion jobs after retention and reference checks, preserving claim generations. Offline DB/object bundles now restore into isolated volumes with table fingerprints, object hashes and reference checks. Actual Worker SIGKILL during Import, Export and Memory ingestion is verified in disposable volumes, including partial rollback, recovered claims and final object hashes. G1 Source revision is next; production/off-host restore remains pending.
+English: Referenced Assets are retained, including references to soft-deleted targets. After explicit detachment, logical deletion and durable jobs commit together; originals remain for 24 hours by default. Staging cleanup waits for signed-URL expiry plus grace. PostgreSQL polling, fenced claims, retries and lease recovery are verified. Asset inventory and integrity reconciliation now report unowned keys, missing/corrupt originals and storage errors. Opt-in apply reopens only completed deletion jobs after retention and reference checks, preserving claim generations. Offline DB/object bundles now restore into isolated volumes with table fingerprints, object hashes and reference checks. Actual Worker SIGKILL during Import, Export and Memory ingestion is verified in disposable volumes, including partial rollback, recovered claims and final object hashes. Source revision and Record provenance pins are implemented; Evidence revision pins are next; production/off-host restore remains pending.
 
-简体中文：保留被引用的Asset，包括已软删除目标的引用。显式解除绑定后，逻辑删除和持久任务在同一事务提交；原本默认保留24小时。临时上传在签名URL过期并经过宽限期后清理。已验证DB轮询、claim世代、重试及lease恢复；已加入Asset清单及完整性核对，分别报告无DB归属对象、原本缺失／损坏及存储错误。显式apply只在重新检查保留期及引用后重启已完成的删除任务，并保留claim世代。已实现离线DB／对象bundle及隔离恢复，并核对表fingerprint、对象hash和引用。已在隔离volume验证Import、Export和Memory导入中的真实SIGKILL，包括部分回滚、重新claim和最终object hash。下一步为G1 Source版本；生产／其他物理host恢复仍为Pending。
+简体中文：保留被引用的Asset，包括已软删除目标的引用。显式解除绑定后，逻辑删除和持久任务在同一事务提交；原本默认保留24小时。临时上传在签名URL过期并经过宽限期后清理。已验证DB轮询、claim世代、重试及lease恢复；已加入Asset清单及完整性核对，分别报告无DB归属对象、原本缺失／损坏及存储错误。显式apply只在重新检查保留期及引用后重启已完成的删除任务，并保留claim世代。已实现离线DB／对象bundle及隔离恢复，并核对表fingerprint、对象hash和引用。已在隔离volume验证Import、Export和Memory导入中的真实SIGKILL，包括部分回滚、重新claim和最终object hash。已实现Source版本和Record出典固定，下一步为Evidence版本固定；生产／其他物理host恢复仍为Pending。
 
-次はG1のSource revisionと出典版固定。G0の開発環境検証は実kill試験を含め完了した。本番provider・別物理hostの確認は引き続きPendingであり、G1の開発とは分けて扱う。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
+G1のSource revisionと出典版固定は完了し、次はEvidenceの参照revision固定。G0の開発環境検証は実kill試験を含め完了した。本番provider・別物理hostの確認は引き続きPendingであり、G1の開発とは分けて扱う。各修正に必要な回帰試験はその修正と同時に追加する。既存データの変更前にbackupと復元確認を行う。
 
 **完了条件:** Recordを端点／証拠にした正常系、権限外・複数ユーザーの拒否、承認済み内容の変更、同時PATCH、全Import経路の承認制約を独立テストで確認。Jobのlease切れ、旧claim、Redis停止、retry上限と公平性、およびAsset確定後の旧PUT URL再利用による原本不変性は確認済み。object削除失敗からのretryとlease切れの復旧も確認済み。別Compose projectのDB＋object復元と参照・hash一致は確認済み。実WorkerのImport／Export／Memory処理途中killと再開も確認済み。本番・別物理hostの復元保証はPendingとする。
 
 ## G1 — 訂正できる知識モデル（現在の着手対象）
 
-- 🟠 [Next] Source revision、Recordの解釈に必要な属性と出典版の固定
-- 🔴 [Later] Evidenceを参照対象revisionへ固定し、独立Sourceと重複証拠を区別
+- 🟢 [Done] Source revision、Record Versionの解釈属性と出典版固定。DB triggerでAPI／同期・非同期Importへ適用。明示的な再固定以外は旧pinを継承し、旧データはlegacy_unknownを保持。Snapshot manifest 1.1へpinとcontextを格納。[migration・検証・制限](source-revisions-progress-2026-11-19.md)。
+- 🟠 [Next] Evidenceを参照対象revisionへ固定し、独立Sourceと重複証拠を区別
 - 🔴 [Later] valid time／recorded time、supersedes／retraction、文脈付き矛盾の最小表現
 - 🔴 [Later] 依存関係とtransactional outbox、stale判定、再検証Job、取消の利用trace
 - 🔴 [Later] 不変Snapshotの影響表示、Source／Asset／policy版を含む再現bundle
@@ -103,6 +103,37 @@ English: Referenced Assets are retained, including references to soft-deleted ta
 ## 研究track — DBのリリースから独立
 
 - 🔴 [Later] [意味凝縮 SC-0〜SC-2](semantic-condensation-and-concept-discovery.md)：文章量と文脈多様性の比較、条件付き概念抽出、既存概念との照合、上限付き再探索。生成例を独立証拠に数えず、未知事例で有用性を測る。
+
+- 🟢 [Done] **根拠パックの差分再構築（オフライン実験）:** `bun experiments/evidence-delta.js`。固定依存関係の合成1,000パックで、訂正・撤回・承認取消は各2パックのみ再構築。新規根拠は1、無関係な変更は0。広範囲の変更や変更履歴の欠落時は全件再構築し、欠落時は正本スナップショットを使用。全ケースで全件再構築の結果と一致。削減率はパックの処理件数であり、LLMのFLOPsや本番速度ではない。
+- 🔴 [Later] G1の版固定・失効検知後、実データで差分更新と全件再構築を比較。依存索引の保守、検証、再構築を含む総時間・メモリを計測し、撤回済み根拠が再利用される場合は採用しない。推論と文章化の分離は根拠パックを候補に検証し、局所逆伝播は独立研究とする。
+
+English: The offline fixture rebuilds 2 of 1,000 evidence packs per local correction, withdrawal or approval revocation, with exact agreement against full refresh. Broad changes rebuild all packs; an unreliable change feed requires an authoritative snapshot. Production reuse requires revision tracking and measured end-to-end gains. This does not measure model FLOPs.
+
+简体中文：离线合成实验中，局部更正、撤回或取消审核只需重建1,000个证据包中的2个，结果与全量重建完全一致。大范围变更时全量重建，变更记录不可靠时必须读取权威快照。生产使用须先完成版本追踪，再测量端到端收益。本实验未测量模型FLOPs。
+
+- 🟢 [Done] **根拠量の制御と経路選択（オフライン実験）:** `bun experiments/evidence-routing.js`。確定済みIDの照会だけ必要な根拠を抽出し、欠落・曖昧・予算超過・対象外の照会は追加確認へ回す。差分再構築後の訂正版を使い、撤回後は簡易経路を拒否。合成例のJSONは95→52 UTF-8 bytes。
+- 🔴 [Later] 実モデルで固定経路と比較し、回答品質・入力トークン・追加確認を含む総コストと遅延を測定する。量子化、KV管理、先読み生成は推論サーバー選定後の比較対象。
+
+English: The offline router compacts evidence for exact lookups and sends missing, ambiguous or over-budget cases to review. Bytes are a context-size proxy; no model routing, token savings or inference cost was measured.
+
+简体中文：离线路由仅为精确查询压缩证据；证据缺失、歧义或超出预算时转入复核。字节数仅反映上下文大小，未测量模型路由、词元节省或推理成本。
+
+- 🟢 [Done] **品質ゲート付き根拠パック縮小（オフライン実験）:** `bun experiments/evidence-pruning.js`。候補選定と検証の照会を分け、元のパックと根拠・版・経路が一致した場合だけ縮小を採用。合成例は6→3件、305→154 bytes。同じ3件を残す固定対照は中国語＋英語の照会で劣化し、元のパックに戻った。
+- 🔴 [Later] 実トレーナーを導入する場合は、全幅・最初から小幅・同じ時点のランダム縮小を比較し、候補探索と失敗分岐も含めて同品質までの総GPU時間を計測する。
+
+English: The offline gate compares compact evidence against the original on separate validation requests. An equal-width control regressed and was rejected. This does not prune model weights or measure training efficiency.
+
+简体中文：离线质量门使用独立的验证请求比较精简证据和原始证据。同等大小的固定对照出现回退，因此被拒绝。此实验不剪枝模型权重，也未测量训练效率。
+
+- 🟢 [Done] **明示条件で打ち切る根拠照会（オフライン実験）:** [CRAM論文 §4.2](https://arxiv.org/html/2611.17309v1)の早期停止を着想に、要求IDの根拠がすべて一意に揃う場合だけ簡易経路を選ぶ。欠落・曖昧・予算切れは追加確認に回す。`bun experiments/evidence-stop.js` では構築済み索引に対し、1,000件の走査に対する2回のID照会を確認。
+- 🔴 [Later] 本番化の前に、同一スナップショット・権限境界・版固定を保証し、索引構築や更新を含めて全走査と比較する。
+
+English: The offline lookup stops at explicit evidence completeness or escalates on ambiguity, absence or budget exhaustion. The fixture uses two indexed lookups; it does not measure end-to-end speed.
+
+简体中文：离线查询在所需证据完整且唯一时停止；存在歧义、缺失或预算耗尽时转入复核。示例执行两次索引查询，未测量端到端速度。
+
+- 🟢 [Done] **対比較記録と候補撤回:** [自己重み編集論文](https://arxiv.org/html/2611.21885v1)から評価手順を採用し、既存根拠縮小実験へ入力hash、全照会の変更前後結果、拒否理由を追加。全件拒否の検証集合での誤採用を防止。`bun experiments/evidence-pruning.js --json`。[検証・制限（日本語／English／简体中文）](paired-evidence-evaluation-progress-2026-11-19.md)。
+- 🔴 [Later] 実モデルの評価基盤で、探索・採否・最終評価を分離し、同一seed／token予算の対比較と総コスト・分野別退行を測定。重み自己編集は独立研究とし、本番DBの自動変更へ接続しない。
 
 - 🔴 [Later] Structure／Delta／Transformation、構造共有・未知関係生成、factorization／composition
 - 🔴 [Later] cross-modal Factor、自己組織化Unit／Assembly、Stability／Replay、Spectral scorer
