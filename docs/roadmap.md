@@ -140,6 +140,20 @@ English: The offline lookup stops at explicit evidence completeness or escalates
 - 🟢 [Done] **対比較記録と候補撤回:** [自己重み編集論文](https://arxiv.org/html/2611.21885v1)から評価手順を採用し、既存根拠縮小実験へ入力hash、全照会の変更前後結果、拒否理由を追加。全件拒否の検証集合での誤採用を防止。`bun experiments/evidence-pruning.js --json`。[検証・制限（日本語／English／简体中文）](paired-evidence-evaluation-progress-2026-11-19.md)。
 - 🔴 [Later] 実モデルの評価基盤で、探索・採否・最終評価を分離し、同一seed／token予算の対比較と総コスト・分野別退行を測定。重み自己編集は独立研究とし、本番DBの自動変更へ接続しない。
 
+- 🟢 [Done] **検索順位の説明・再構成実験。** [iWSP論文](https://arxiv.org/html/2611.18114v1)の明示的な計算と再構成監査を、検索の比較基準に応用。題名・本文の一致を別々に採点し、寄与を出力する。合成三言語fixtureでID順との比較と独立した式による順位再構成を確認。実行は `bun experiments/interpretable-ranking.js`。
+- 🔴 [Later] G2の固定評価セットで、字句順・説明可能な順位付け・Embedding併用を比較する。題名だけ一致する誤誘導、表記ゆれ、訂正・撤回を含め、品質と根拠の再現性を確認してから順位付けを本番へ採用する。
+
+English. The offline experiment reports title and body score contributions and reconstructs the result independently on fixed synthetic cases. Production ranking requires a separate evaluation set, including misleading titles and withdrawn sources.
+
+简体中文。离线实验报告标题和正文的评分贡献，并在固定合成用例上独立重建排序。生产排序需通过独立评估，包括误导性标题和已撤回来源。
+
+- 🟢 [Done] **順位付け重みの進化戦略比較。** [Evolution Strategies at Scale §3](https://arxiv.org/html/2509.24372v3)の摂動・評価・更新を、検索の題名／本文重み比に適用したオフライン実験。固定重み、グリッド、進化戦略は別の合成評価6件でいずれもTop-1が3件。調整評価はグリッド5回、進化戦略65回。出典失効を模した対象外文書は全方式で0件。`bun experiments/ranking-evolution.js`。この比較では進化戦略の優位性は確認できなかった。
+- 🔴 [Later] 順位付けの特徴や調整対象が増えた場合に、同一評価予算・複数seed・独立評価集合で進化戦略を再比較する。
+
+English. The synthetic hold-out tied at 3/6 across fixed weights, grid search and evolution strategies. Grid search required fewer tuning evaluations. Eligibility stays outside the optimizer.
+
+简体中文。固定权重、网格搜索和进化策略在合成保留集上均命中3/6。网格搜索的调参评估次数更少。候选资格由优化器之外的规则决定。
+
 - 🔴 [Later] Structure／Delta／Transformation、構造共有・未知関係生成、factorization／composition
 - 🔴 [Later] cross-modal Factor、自己組織化Unit／Assembly、Stability／Replay、Spectral scorer
 - 🔴 [Later] Fractal Canopy FC-0〜5、HLC-0〜4、ICP-0〜5、SNN-L0〜5、RISA／SARA Engine
