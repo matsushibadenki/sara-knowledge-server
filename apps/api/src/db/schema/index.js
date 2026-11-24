@@ -15,6 +15,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  vector,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -301,6 +302,16 @@ export const recordVersions = datasetSchema.table('record_versions', {
     .where(sql`${table.isCurrent} = true AND ${table.deletedAt} IS NULL`),
   recordIdIndex: index('record_versions_record_id_idx').on(table.recordId),
   createdByIndex: index('record_versions_created_by_idx').on(table.createdBy),
+}));
+
+export const recordSearchChunks = datasetSchema.table('record_search_chunks', {
+  recordVersionId: uuid('record_version_id').notNull().references(() => recordVersions.id, { onDelete: 'cascade' }),
+  encoder: text('encoder').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  content: text('content').notNull(),
+  embedding: vector('embedding', { dimensions: 256 }).notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.recordVersionId, table.encoder, table.ordinal] }),
 }));
 
 export const tags = datasetSchema.table('tags', {

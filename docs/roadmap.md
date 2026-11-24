@@ -77,7 +77,8 @@ G1のSource revisionと出典版固定は完了し、Evidenceの参照revision�
 ## G2 — 検索と利用による価値実証（現在の着手対象）
 
 - 🟢 [Done] 三言語の字句検索、カーソルページ送り、候補／確定知識の分離。確定検索は照会時に出典版と失効を判定。[仕様・検証](lexical-search.md)。
-- 🟠 [Next] chunk／EmbeddingをRecord revision・encoder版へ固定。pgvector検索＋字句検索の比較
+- 🟢 [Done] Record revision・encoder版に固定したチャンクとEmbedding。字句／pgvector併用APIと確定検索の失効除外。[仕様・検証](hybrid-search.md)。
+- 🟠 [Next] 固定コーパスで字句単独とpgvector併用を比較し、品質と遅延を測定。
 - 🔴 [Later] bounded traversalの省略理由・上限・タイムアウト、必要な根拠を返すretrieval API
 - 🔴 [Later] API schema／response／errorのOpenAPI契約と、回答context取得・学習bundle取得の2クライアント
 - 🔴 [Later] 最小の検索・出典・差分・レビュー画面を日本語／English／简体中文で実装

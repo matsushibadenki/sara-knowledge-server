@@ -13,6 +13,16 @@ integrationTest('multilingual literal search separates candidates and excludes s
     const title = `再起動手順 Ｒｅｃｏｖｅｒｙ 恢复指南 ${suffix}`;
     const record = (await write('/records', 'POST', { record_type: 'plain_text', source_id: source.id, title, content: { text: title } })).body.data;
     const second = (await write('/records', 'POST', { record_type: 'plain_text', title, content: { text: title } })).body.data;
+    const indexPath = `/search/records/${record.id}/versions/${record.current_version.id}/index`;
+    const indexed = await write(indexPath, 'PUT', {});
+    expect(indexed.response.status).toBe(200);
+    expect(indexed.body.data.chunk_count).toBe(1);
+    expect((await write(indexPath, 'PUT', {})).body.data).toEqual(indexed.body.data);
+    const hybrid = (mode) => request('/api/v1/search/hybrid?' + new URLSearchParams({ q: suffix, mode }), { headers });
+    const candidates = await hybrid('candidate');
+    expect(candidates.response.status).toBe(200);
+    expect(candidates.body.data[0]).toMatchObject({ id: record.id, lexical_match: true });
+    expect(candidates.body.data[0].similarity).toBeGreaterThan(0);
     for (const term of ['再起動', 'RECOVERY', '恢复指南']) {
       const result = await find(`${term} ${suffix}`, 'candidate', { kind: 'record' });
       expect(result.response.status).toBe(200);
@@ -48,6 +58,7 @@ integrationTest('multilingual literal search separates candidates and excludes s
     expect((await request(`/api/v1/records/${record.id}/reviews/${review.id}/decision`, {
       method: 'POST', headers: reviewer, body: JSON.stringify({ decision: 'approved' }),
     })).response.status).toBe(200);
+    expect((await hybrid('confirmed')).body.data.map((row) => row.id)).toEqual([record.id]);
     const confirmedRecords = () => find(`再起動 ${suffix}`, 'confirmed', { kind: 'record' });
     expect((await confirmedRecords()).body.data.map((row) => row.id)).toEqual([record.id]);
     expect((await find(suffix, 'candidate', { kind: 'record' })).body.data.map((row) => row.id)).toEqual([second.id]);
@@ -55,6 +66,7 @@ integrationTest('multilingual literal search separates candidates and excludes s
     expect((await write(`/sources/${source.id}`, 'PATCH', { expected_revision: 1, title: 'Corrected' })).response.status).toBe(200);
     expect((await confirmed()).body.data).toEqual([]);
     expect((await confirmedRecords()).body.data).toEqual([]);
+    expect((await hybrid('confirmed')).body.data).toEqual([]);
     const current = (await request(`/api/v1/memory/relations/${relation.id}`, { headers })).body.data;
     const replacement = (await addEvidence(current.revision, original.evidence.id)).body.data;
     expect((await verify(replacement.relation.revision)).response.status).toBe(200);
